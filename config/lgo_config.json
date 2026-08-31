@@ -1,0 +1,393 @@
+{
+  "service": {
+    "host": "127.0.0.1",
+    "port": 7865,
+    "runs_dir": "{project_root}\\runs"
+  },
+  "paths": {
+    "python": "{project_root}\\.venv\\Scripts\\python.exe",
+    "venv_python": "{project_root}\\.venv\\Scripts\\python.exe",
+    "blender": "D:\\Games\\Steam\\steamapps\\common\\Blender\\blender.exe",
+    "cache_dir": "{project_root}\\.cache",
+    "models_root": "E:\\AI\\Models",
+    "hunyuan_source_dir": "{project_root}\\vendor\\Hunyuan3D-2.1"
+  },
+  "models": {
+    "single_shape": "E:\\AI\\Models\\Hunyuan3D-DiT-v2-1",
+    "multiview_shape": "E:\\AI\\Models\\Hunyuan3D-DiT-v2-mv",
+    "paint_root": "E:\\AI\\Models\\Hunyuan3D-Paint-v2-1",
+    "paint_model": "E:\\AI\\Models\\Hunyuan3D-Paint-v2-1\\hunyuan3d-paintpbr-v2-1",
+    "vae": "E:\\AI\\Models\\Hunyuan3D-Paint-v2-1\\hunyuan3d-vae-v2-1",
+    "hy3dpaint": "E:\\AI\\Models\\Hunyuan3D-Paint-v2-1\\hy3dpaint",
+    "realesrgan": "E:\\AI\\Models\\Hunyuan3D-Paint-v2-1\\hy3dpaint\\ckpt\\RealESRGAN_x4plus.pth"
+  },
+  "generation": {
+    "default_quality": "high",
+    "default_texture_quality": "fast",
+    "low_vram": false,
+    "seed": 1234,
+    "num_inference_steps": 50,
+    "guidance_scale": 5.0,
+    "octree_resolution": 256,
+    "num_chunks": 200000,
+    "texture_views": 6,
+    "texture_resolution": 512,
+    "texture_remesh_target": 50000,
+    "default_formats": ["glb"],
+    "default_object_type": "organic",
+    "allow_fbx": true
+  },
+  "quality_presets": {
+    "fast": {
+      "label": "Fast",
+      "generation": {
+        "num_inference_steps": 36,
+        "guidance_scale": 5.0,
+        "octree_resolution": 256,
+        "num_chunks": 180000,
+        "texture_views": 4,
+        "texture_resolution": 384,
+        "texture_remesh_target": 40000
+      },
+      "postprocess": {
+        "subdivide": {
+          "iterations": 1,
+          "max_faces": 500000
+        },
+        "textured_subdivide": {
+          "iterations": 1,
+          "max_faces": 500000
+        },
+        "smooth": {
+          "iterations": 4,
+          "alpha": 0.12,
+          "beta": 0.35
+        },
+        "textured_smooth": {
+          "iterations": 3,
+          "alpha": 0.12,
+          "beta": 0.3
+        }
+      }
+    },
+    "balanced": {
+      "label": "Balanced",
+      "generation": {
+        "num_inference_steps": 50,
+        "guidance_scale": 5.0,
+        "octree_resolution": 256,
+        "num_chunks": 200000,
+        "texture_views": 6,
+        "texture_resolution": 512,
+        "texture_remesh_target": 50000
+      },
+      "postprocess": {
+        "subdivide": {
+          "iterations": 1,
+          "max_faces": 800000
+        },
+        "textured_subdivide": {
+          "iterations": 1,
+          "max_faces": 800000
+        },
+        "smooth": {
+          "iterations": 6,
+          "alpha": 0.12,
+          "beta": 0.4
+        },
+        "textured_smooth": {
+          "iterations": 4,
+          "alpha": 0.12,
+          "beta": 0.35
+        }
+      }
+    },
+    "high": {
+      "label": "High",
+      "generation": {
+        "num_inference_steps": 64,
+        "guidance_scale": 5.5,
+        "octree_resolution": 384,
+        "num_chunks": 240000,
+        "texture_views": 6,
+        "texture_resolution": 512,
+        "texture_remesh_target": 60000
+      },
+      "preprocess": {
+        "alpha_threshold": 64,
+        "shadow_alpha_threshold": 165,
+        "edge_feather": 0.35,
+        "detail_enhance": {
+          "contrast": 1.12,
+          "sharpness_radius": 1.0,
+          "sharpness_percent": 135,
+          "sharpness_threshold": 3
+        }
+      },
+      "postprocess": {
+        "subdivide": {
+          "iterations": 1,
+          "max_faces": 1200000
+        },
+        "textured_subdivide": {
+          "iterations": 1,
+          "max_faces": 1200000
+        },
+        "smooth": {
+          "iterations": 8,
+          "alpha": 0.12,
+          "beta": 0.45
+        },
+        "textured_smooth": {
+          "iterations": 5,
+          "alpha": 0.12,
+          "beta": 0.38
+        }
+      }
+    }
+  },
+  "object_type_presets": {
+    "organic": {
+      "label": "Organic",
+      "postprocess": {
+        "finger_guard": {
+          "enabled": true
+        },
+        "toe_guard": {
+          "enabled": true
+        },
+        "floor_plate": {
+          "enabled": true
+        }
+      }
+    },
+    "hard_surface": {
+      "label": "Hard surface",
+      "preprocess": {
+        "edge_feather": 0.22,
+        "detail_enhance": {
+          "enabled": true,
+          "contrast": 1.14,
+          "sharpness_radius": 0.8,
+          "sharpness_percent": 150,
+          "sharpness_threshold": 2
+        }
+      },
+      "postprocess": {
+        "smooth": {
+          "enabled": true,
+          "iterations": 2,
+          "alpha": 0.05,
+          "beta": 0.16
+        },
+        "textured_smooth": {
+          "enabled": false,
+          "iterations": 0
+        },
+        "finger_guard": {
+          "enabled": false
+        },
+        "toe_guard": {
+          "enabled": false
+        },
+        "floor_plate": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "texture_quality_presets": {
+    "fast": {
+      "label": "Fast texture",
+      "generation": {
+        "texture_views": 4,
+        "texture_resolution": 384,
+        "texture_remesh_target": 40000
+      },
+      "postprocess": {
+        "textured_subdivide": {
+          "enabled": false,
+          "iterations": 0,
+          "max_faces": 400000
+        },
+        "textured_smooth": {
+          "enabled": true,
+          "iterations": 2,
+          "alpha": 0.12,
+          "beta": 0.3
+        }
+      }
+    },
+    "balanced": {
+      "label": "Balanced texture",
+      "generation": {
+        "texture_views": 6,
+        "texture_resolution": 512,
+        "texture_remesh_target": 50000
+      },
+      "postprocess": {
+        "textured_subdivide": {
+          "enabled": true,
+          "iterations": 1,
+          "max_faces": 800000
+        },
+        "textured_smooth": {
+          "enabled": true,
+          "iterations": 4,
+          "alpha": 0.12,
+          "beta": 0.35
+        }
+      }
+    },
+    "high": {
+      "label": "High texture",
+      "generation": {
+        "texture_views": 6,
+        "texture_resolution": 512,
+        "texture_remesh_target": 60000
+      },
+      "postprocess": {
+        "textured_subdivide": {
+          "enabled": true,
+          "iterations": 1,
+          "max_faces": 1200000
+        },
+        "textured_smooth": {
+          "enabled": true,
+          "iterations": 5,
+          "alpha": 0.12,
+          "beta": 0.38
+        }
+      }
+    }
+  },
+  "preprocess": {
+    "enabled": true,
+    "save_cleaned": true,
+    "alpha_threshold": 56,
+    "shadow_alpha_threshold": 150,
+    "shadow_brightness_threshold": 90,
+    "shadow_saturation_threshold": 42,
+    "harden_alpha": true,
+    "alpha_gamma": 0.75,
+    "morph_open_size": 3,
+    "keep_largest_component": true,
+    "edge_feather": 0.4,
+    "detail_enhance": {
+      "enabled": true,
+      "contrast": 1.08,
+      "sharpness_radius": 1.2,
+      "sharpness_percent": 115,
+      "sharpness_threshold": 4
+    }
+  },
+  "postprocess": {
+    "subdivide": {
+      "enabled": true,
+      "iterations": 1,
+      "max_iterations": 2,
+      "max_faces": 800000
+    },
+    "smooth": {
+      "enabled": true,
+      "method": "humphrey",
+      "iterations": 6,
+      "alpha": 0.12,
+      "beta": 0.4
+    },
+    "textured_subdivide": {
+      "enabled": true,
+      "iterations": 1,
+      "max_iterations": 2,
+      "max_faces": 800000
+    },
+    "textured_smooth": {
+      "enabled": true,
+      "method": "humphrey",
+      "iterations": 4,
+      "alpha": 0.12,
+      "beta": 0.35
+    },
+    "texture_material": {
+      "enabled": true,
+      "albedo_denoise": true,
+      "albedo_median_blend": 0.24,
+      "albedo_median_size": 3,
+      "albedo_blur_radius": 0.35,
+      "albedo_shadow_lift": 12,
+      "albedo_brightness": 1.08,
+      "albedo_color": 0.92,
+      "albedo_contrast": 0.94,
+      "metallic_enabled": true,
+      "metallic_scale": 0.03,
+      "metallic_max": 6,
+      "roughness_enabled": true,
+      "roughness_lift": 120,
+      "roughness_min": 220,
+      "roughness_max": 255
+    },
+    "shade_smooth": {
+      "enabled": true
+    },
+    "finger_guard": {
+      "enabled": true,
+      "max_fingers_per_hand": 5,
+      "side_axis": "x",
+      "vertical_axis": "y",
+      "search_side_fraction": 0.32,
+      "vertical_min_fraction": 0.16,
+      "vertical_max_fraction": 0.78,
+      "silhouette_bins": 96,
+      "smooth_window": 5,
+      "prominence_window": 5,
+      "min_search_vertices": 320,
+      "min_bin_points": 14,
+      "min_prominence_fraction": 0.018,
+      "min_peak_spacing_fraction": 0.035,
+      "remove_depth_fraction": 0.035,
+      "remove_band_fraction": 0.032,
+      "remove_bin_widths": 2.2,
+      "min_tip_face_vertices": 2,
+      "max_removed_face_ratio": 0.035,
+      "keep_largest_component": true
+    },
+    "toe_guard": {
+      "enabled": true,
+      "toe_count": 5,
+      "width_axis": "x",
+      "vertical_axis": "y",
+      "depth_axis": "z",
+      "foot_min_height_fraction": 0.0,
+      "foot_max_height_fraction": 0.22,
+      "tip_quantile": 0.68,
+      "groove_start_quantile": 0.54,
+      "width_low_quantile": 0.08,
+      "width_high_quantile": 0.92,
+      "min_foot_vertices": 700,
+      "min_tip_vertices": 160,
+      "min_groove_vertices": 24,
+      "min_foot_width_fraction": 0.055,
+      "groove_width_fraction": 0.055,
+      "depth_strength_fraction": 0.028,
+      "vertical_strength_fraction": 0.01,
+      "top_surface_quantile": 0.48,
+      "top_falloff_fraction": 0.035,
+      "length_falloff_power": 1.2
+    },
+    "floor_plate": {
+      "enabled": true,
+      "save_raw_mesh": true,
+      "vertical_axis": "y",
+      "search_height_fraction": 0.24,
+      "plane_bin_fraction": 0.012,
+      "plane_strength_ratio": 0.35,
+      "normal_threshold": 0.72,
+      "min_flat_area_ratio": 0.045,
+      "min_horizontal_coverage": 0.52,
+      "cut_padding_fraction": 0.018,
+      "outer_radius_fraction": 0.34,
+      "max_removed_area_ratio": 0.95,
+      "keep_largest_component": true
+    }
+  }
+}

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local virtual environments and dependency caches
+.venv/
+venv/
+.cache/
+wheelhouse/
+
+# Local Hunyuan3D source checkout and model weights
+vendor/
+models/
+
+# Generated jobs, logs, and exports
+runs/
+outputs/
+logs/
+*.log
+/*.glb
+/*.fbx
+/*.obj
+/*.ply
+/*.stl
+/mr_combined.png
+/temp.*
+
+# Blender/editor artifacts
+*.blend1
+*.blend2
+*.tmp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LGO</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2310151d'/%3E%3Cpath d='M32 10 50 20 32 30 14 20Z' fill='%2372a7ff'/%3E%3Cpath d='M14 20 32 30v22L14 41Z' fill='%2341d69c'/%3E%3Cpath d='M50 20 32 30v22l18-11Z' fill='%23f5b84c'/%3E%3Cpath d='M32 30v22M14 20l18 10 18-10' fill='none' stroke='%23f6f8fb' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" type="image/svg+xml">
+    <link rel="icon" href="/favicon-32.png?v=4" sizes="32x32" type="image/png">
+    <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
+    <link rel="shortcut icon" href="/favicon.ico?v=4">
+    <link rel="stylesheet" href="/styles.css?v=14">
+    <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>LGO</h1>
+          <p>Local Generation Object</p>
+        </div>
+        <button id="refreshHealth" type="button">Refresh</button>
+      </section>
+
+      <section class="status-strip" id="healthStrip"></section>
+
+      <section class="workspace">
+        <div class="left-stack">
+          <form id="jobForm" class="panel input-panel">
+            <div class="section-title">
+              <h2>Input</h2>
+              <div class="segmented" role="tablist" aria-label="Generation mode">
+                <button class="active" type="button" data-mode="single">1 image</button>
+                <button type="button" data-mode="multiview">4 views</button>
+              </div>
+            </div>
+
+            <input type="hidden" id="mode" name="mode" value="single">
+
+            <div id="singleFields" class="upload-grid single">
+              <div class="upload-field">
+                <div class="drop preview-drop" data-preview-box="single">
+                  <span class="drop-title">Single image</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="single" alt="Single image preview">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="single" accept="image/*" data-preview-target="single">
+                  </label>
+                  <span class="file-name" data-file-name="single">No file selected</span>
+                </div>
+              </div>
+            </div>
+
+            <div id="multiFields" class="upload-grid hidden">
+              <div class="upload-field">
+                <div class="drop preview-drop" data-preview-box="front">
+                  <span class="drop-title">Front</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="front" alt="Front view preview">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="front" accept="image/*" data-preview-target="front">
+                  </label>
+                  <span class="file-name" data-file-name="front">No file selected</span>
+                </div>
+              </div>
+              <div class="upload-field">
+                <div class="drop preview-drop" data-preview-box="back">
+                  <span class="drop-title">Back</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="back" alt="Back view preview">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="back" accept="image/*" data-preview-target="back">
+                  </label>
+                  <span class="file-name" data-file-name="back">No file selected</span>
+                </div>
+              </div>
+              <div class="upload-field">
+                <div class="drop preview-drop" data-preview-box="left">
+                  <span class="drop-title">Left</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="left" alt="Left view preview">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="left" accept="image/*" data-preview-target="left">
+                  </label>
+                  <span class="file-name" data-file-name="left">No file selected</span>
+                </div>
+              </div>
+              <div class="upload-field">
+                <div class="drop preview-drop" data-preview-box="right">
+                  <span class="drop-title">Right</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="right" alt="Right view preview">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="right" accept="image/*" data-preview-target="right">
+                  </label>
+                  <span class="file-name" data-file-name="right">No file selected</span>
+                </div>
+              </div>
+            </div>
+
+            <input type="hidden" id="quality" name="quality" value="high">
+            <input type="hidden" id="objectType" name="object_type" value="organic">
+            <input type="hidden" id="texture" name="texture" value="true">
+            <input type="hidden" id="textureQuality" name="texture_quality" value="fast">
+
+            <div class="setting-row">
+              <span class="field-label">Quality</span>
+              <div class="segmented quality-toggle" role="tablist" aria-label="Quality preset">
+                <button type="button" data-quality="fast">Fast</button>
+                <button type="button" data-quality="balanced">Balanced</button>
+                <button class="active" type="button" data-quality="high">High</button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <span class="field-label">Object type</span>
+              <div class="segmented object-type-toggle" role="tablist" aria-label="Object type">
+                <button class="active" type="button" data-object-type="organic">Organic</button>
+                <button type="button" data-object-type="hard_surface">Hard surface</button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <span class="field-label">Texture</span>
+              <div class="segmented texture-toggle" role="tablist" aria-label="Texture mode">
+                <button class="active" type="button" data-texture="true">PBR texture</button>
+                <button type="button" data-texture="false">No texture</button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <span class="field-label">Texture speed</span>
+              <div class="segmented texture-quality-toggle" role="tablist" aria-label="Texture speed">
+                <button class="active" type="button" data-texture-quality="fast">Fast</button>
+                <button type="button" data-texture-quality="balanced">Balanced</button>
+                <button type="button" data-texture-quality="high">High</button>
+              </div>
+            </div>
+
+            <div class="options format-options">
+              <label class="check">
+                <input type="checkbox" name="formats" value="glb" checked>
+                <span>GLB</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" name="formats" value="obj">
+                <span>OBJ</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" name="formats" value="fbx">
+                <span>FBX</span>
+              </label>
+            </div>
+
+            <button class="primary" type="submit">Create Job</button>
+            <button id="addTextureButton" class="secondary" type="button" disabled>Add texture</button>
+          </form>
+
+          <section class="panel progress-panel">
+            <div class="section-title compact-title">
+              <h2>Task progress</h2>
+              <span id="progressPercent" class="progress-percent">0%</span>
+            </div>
+            <div class="progress-track" aria-label="Task progress">
+              <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <div id="progressStatus" class="progress-status">No active job.</div>
+          </section>
+
+          <section class="panel history-panel">
+            <div class="section-title compact-title">
+              <h2>History</h2>
+              <div class="history-actions">
+                <div class="segmented history-filter" role="tablist" aria-label="History filter">
+                  <button class="active" type="button" data-history-filter="all">All</button>
+                  <button type="button" data-history-filter="models">Models</button>
+                  <button type="button" data-history-filter="no-model">No model</button>
+                </div>
+                <button id="refreshHistory" class="small-button" type="button">Refresh</button>
+              </div>
+            </div>
+            <div id="historyList" class="history-list">No generations yet.</div>
+          </section>
+
+          <section class="panel run-panel">
+            <div class="section-title compact-title">
+              <h2>Run</h2>
+              <span id="runBadge" class="run-badge">Idle</span>
+            </div>
+            <pre id="jobStatus" class="log">No job yet.</pre>
+          </section>
+        </div>
+
+        <section class="panel scene-panel">
+          <div class="section-title compact-title">
+            <h2>Result</h2>
+            <span id="sceneStatus" class="scene-status">Waiting</span>
+          </div>
+          <div class="scene-frame">
+            <div id="viewerChoices" class="scene-toolbar"></div>
+            <model-viewer
+              id="modelViewer"
+              class="model-viewer hidden"
+              camera-controls
+              auto-rotate
+              rotation-per-second="8deg"
+              shadow-intensity="0.85"
+              exposure="1"
+              camera-orbit="0deg 78deg 12m"
+              min-camera-orbit="auto auto 0.05m"
+              max-camera-orbit="auto auto 160m"
+              min-field-of-view="10deg"
+              max-field-of-view="80deg">
+            </model-viewer>
+            <div id="sceneEmpty" class="scene-empty">No model yet.</div>
+          </div>
+          <div id="ratingPanel" class="rating-panel hidden"></div>
+          <div id="outputLinks" class="output-links"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js?v=19"></script>
+  </body>
+</html>

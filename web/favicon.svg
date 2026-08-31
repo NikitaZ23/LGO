@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LGO">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#72a7ff"/>
+      <stop offset="0.52" stop-color="#41d69c"/>
+      <stop offset="1" stop-color="#f5b84c"/>
+    </linearGradient>
+    <linearGradient id="face" x1="18" y1="16" x2="46" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c9dcff"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#10151d"/>
+  <path d="M18 20 32 12l14 8v16l-14 8-14-8V20Z" fill="url(#bg)"/>
+  <path d="m32 12 14 8-14 8-14-8 14-8Z" fill="url(#face)" opacity=".88"/>
+  <path d="M32 28v16M18 20l14 8 14-8" fill="none" stroke="#10151d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+  <text x="32" y="54" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" fill="#f6f8fb">LGO</text>
+</svg>
