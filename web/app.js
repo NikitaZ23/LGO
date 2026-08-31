@@ -64,6 +64,7 @@ const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
 const inputStoreName = "files";
 let inputDbPromise = null;
+const objectTypeValues = ["organic", "hard_surface", "rock"];
 const sceneZoom = {
   minRadius: 0.05,
   maxRadius: 160,
@@ -127,7 +128,7 @@ qualityButtons.forEach((button) => {
 });
 
 function setObjectType(objectType) {
-  const selected = ["organic", "hard_surface"].includes(objectType) ? objectType : "organic";
+  const selected = objectTypeValues.includes(objectType) ? objectType : "organic";
   objectTypeInput.value = selected;
   localStorage.setItem("lgo.objectType", selected);
   objectTypeButtons.forEach((button) => {
@@ -1108,6 +1109,7 @@ function objectTypeLabel(value) {
   const labels = {
     organic: "Organic",
     hard_surface: "Hard surface",
+    rock: "Rock / stone",
   };
   return labels[selected] || labels.organic;
 }
@@ -1133,7 +1135,7 @@ function restoreFormState() {
   }
 
   const storedObjectType = localStorage.getItem("lgo.objectType");
-  if (storedObjectType === "organic" || storedObjectType === "hard_surface") {
+  if (objectTypeValues.includes(storedObjectType)) {
     setObjectType(storedObjectType);
   } else {
     setObjectType(objectTypeInput.value || "organic");

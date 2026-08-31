@@ -339,7 +339,8 @@ button:disabled {
 }
 
 .object-type-toggle {
-  max-width: 360px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 420px;
 }
 
 .quality-toggle,

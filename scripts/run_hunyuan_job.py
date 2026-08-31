@@ -1332,9 +1332,10 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         conf.multiview_cfg_path = str(source_dir / "hy3dpaint" / "cfgs" / "hunyuan-paint-pbr.yaml")
         conf.custom_pipeline = str(source_dir / "hy3dpaint" / "hunyuanpaintpbr")
         paint_pipeline = Hunyuan3DPaintPipeline(conf)
+        texture_prompt, texture_prompt_report = _prepare_texture_prompt_image(images, config, output_dir)
         paint_pipeline(
             mesh_path=str(white_obj),
-            image_path=_primary_image(images),
+            image_path=texture_prompt,
             output_mesh_path=str(textured_obj),
             save_glb=False,
         )
@@ -1346,6 +1347,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         texture_material = _stabilize_pbr_textures(textures, config)
         create_glb_with_pbr_materials(str(textured_obj), textures, str(textured_glb))
         textured_postprocess = _refine_textured_glb(textured_glb, config)
+        textured_postprocess["texture_prompt"] = texture_prompt_report
         textured_postprocess["texture_material"] = texture_material
         return textured_glb, None, textured_postprocess
     except Exception as exc:  # noqa: BLE001 - shape output is still useful without texture.
@@ -1377,6 +1379,54 @@ def _stabilize_pbr_textures(textures: dict[str, str], config: dict[str, Any]) ->
         for item in (albedo_report, metallic_report, roughness_report)
     )
     return report
+
+
+def _prepare_texture_prompt_image(images, config: dict[str, Any], output_dir: Path) -> tuple[Image.Image, dict[str, Any]]:
+    settings = config.get("postprocess", {}).get("texture_prompt", {})
+    source = _primary_image(images).convert("RGBA")
+    report: dict[str, Any] = {
+        "enabled": bool(settings.get("enabled", False)),
+        "source_size": source.size,
+    }
+    if not report["enabled"]:
+        return source, report
+
+    image = Image.new("RGB", source.size, (255, 255, 255))
+    image.paste(source.convert("RGB"), mask=source.getchannel("A"))
+    report["mean_before"] = _image_mean(image)
+
+    gamma = float(settings.get("gamma", 1.0))
+    if gamma > 0 and abs(gamma - 1.0) > 0.001:
+        image = _apply_gamma(image, gamma)
+
+    contrast = float(settings.get("contrast", 1.0))
+    brightness = float(settings.get("brightness", 1.0))
+    color = float(settings.get("color", 1.0))
+    sharpness = float(settings.get("sharpness", 1.0))
+    if contrast > 0 and abs(contrast - 1.0) > 0.001:
+        image = ImageEnhance.Contrast(image).enhance(contrast)
+    if brightness > 0 and abs(brightness - 1.0) > 0.001:
+        image = ImageEnhance.Brightness(image).enhance(brightness)
+    if color > 0 and abs(color - 1.0) > 0.001:
+        image = ImageEnhance.Color(image).enhance(color)
+    if sharpness > 0 and abs(sharpness - 1.0) > 0.001:
+        image = ImageEnhance.Sharpness(image).enhance(sharpness)
+
+    report.update(
+        {
+            "mean_after": _image_mean(image),
+            "gamma": gamma,
+            "contrast": contrast,
+            "brightness": brightness,
+            "color": color,
+            "sharpness": sharpness,
+        }
+    )
+    if bool(settings.get("save", True)):
+        target = output_dir / "texture_prompt.png"
+        image.save(target)
+        report["path"] = str(target)
+    return image, report
 
 
 def _stabilize_albedo_map(path: Path, settings: dict[str, Any]) -> dict[str, Any]:
@@ -1416,11 +1466,66 @@ def _stabilize_albedo_map(path: Path, settings: dict[str, Any]) -> dict[str, Any
         if contrast != 1.0:
             image = ImageEnhance.Contrast(image).enhance(contrast)
 
+        tone_report = _tone_balance_albedo(image, settings)
+        if tone_report.get("applied"):
+            image = tone_report.pop("image")
+        report["tone_balance"] = tone_report
+
         image.save(path, quality=95)
         report["mean_after"] = _image_mean(image)
         report["applied"] = True
     except Exception as exc:  # noqa: BLE001 - keep texture pass if stabilization fails.
         report["error"] = str(exc)
+    return report
+
+
+def _apply_gamma(image: Image.Image, gamma: float) -> Image.Image:
+    import numpy as np
+
+    array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    array = np.power(np.clip(array, 0.0, 1.0), gamma)
+    return Image.fromarray(np.clip(array * 255.0, 0, 255).astype(np.uint8), mode="RGB")
+
+
+def _tone_balance_albedo(image: Image.Image, settings: dict[str, Any]) -> dict[str, Any]:
+    report: dict[str, Any] = {"enabled": bool(settings.get("albedo_tone_balance", False)), "applied": False}
+    if not report["enabled"]:
+        return report
+
+    import numpy as np
+
+    array = np.asarray(image.convert("RGB"), dtype=np.float32)
+    luma = array[:, :, 0] * 0.2126 + array[:, :, 1] * 0.7152 + array[:, :, 2] * 0.0722
+    threshold = float(settings.get("albedo_active_threshold", 8))
+    active = luma > threshold
+    if int(active.sum()) < max(64, int(active.size * 0.01)):
+        active = np.ones_like(luma, dtype=bool)
+
+    mean_before = float(luma[active].mean()) if int(active.sum()) else float(luma.mean())
+    min_mean = float(settings.get("albedo_min_luma_mean", 0))
+    target_mean = float(settings.get("albedo_target_luma_mean", max(min_mean, mean_before)))
+    max_gain = max(1.0, float(settings.get("albedo_max_gain", 2.0)))
+    report.update(
+        {
+            "active_pixels": int(active.sum()),
+            "mean_before": round(mean_before, 2),
+            "min_luma_mean": min_mean,
+            "target_luma_mean": target_mean,
+            "max_gain": max_gain,
+        }
+    )
+    if min_mean <= 0 or mean_before >= min_mean:
+        report["reason"] = "luma already above minimum"
+        return report
+
+    gain = min(max_gain, max(1.0, target_mean / max(mean_before, 1.0)))
+    balanced = np.clip(array * gain, 0, 255)
+    report["gain"] = round(gain, 3)
+    report["mean_after"] = round(float((
+        balanced[:, :, 0] * 0.2126 + balanced[:, :, 1] * 0.7152 + balanced[:, :, 2] * 0.0722
+    )[active].mean()), 2)
+    report["image"] = Image.fromarray(balanced.astype(np.uint8), mode="RGB")
+    report["applied"] = True
     return report
 
 
@@ -1514,12 +1619,21 @@ def _refine_textured_glb(path: Path, config: dict[str, Any]) -> dict[str, Any]:
     if not hasattr(scene, "geometry") or not scene.geometry:
         report["reason"] = "no geometry in textured glb"
         report["shade_smooth"] = _shade_smooth_glb(config, path)
+        report["glb_material"] = _stabilize_glb_pbr_materials(path, config)
+        report["applied"] = (
+            bool(report["shade_smooth"].get("applied"))
+            or bool(report["glb_material"].get("applied"))
+        )
         return report
     if len(scene.geometry) != 1:
         report["reason"] = "multi-geometry textured glb is not refined yet"
         report["geometries"] = len(scene.geometry)
         report["shade_smooth"] = _shade_smooth_glb(config, path)
-        report["applied"] = bool(report["shade_smooth"].get("applied"))
+        report["glb_material"] = _stabilize_glb_pbr_materials(path, config)
+        report["applied"] = (
+            bool(report["shade_smooth"].get("applied"))
+            or bool(report["glb_material"].get("applied"))
+        )
         return report
 
     name, mesh = next(iter(scene.geometry.items()))
@@ -1560,9 +1674,62 @@ def _refine_textured_glb(path: Path, config: dict[str, Any]) -> dict[str, Any]:
         refined_scene.export(str(path))
 
     report["shade_smooth"] = _shade_smooth_glb(config, path)
+    report["glb_material"] = _stabilize_glb_pbr_materials(path, config)
     report["warnings"] = warnings
-    report["applied"] = changed or bool(report["shade_smooth"].get("applied"))
+    report["applied"] = (
+        changed
+        or bool(report["shade_smooth"].get("applied"))
+        or bool(report["glb_material"].get("applied"))
+    )
     report["path"] = str(path)
+    return report
+
+
+def _stabilize_glb_pbr_materials(path: Path, config: dict[str, Any]) -> dict[str, Any]:
+    settings = config.get("postprocess", {}).get("texture_material", {})
+    report: dict[str, Any] = {
+        "enabled": bool(settings.get("enabled", True)),
+        "applied": False,
+    }
+    if not report["enabled"]:
+        return report
+    if path.suffix.lower() not in {".glb", ".gltf"} or not path.exists():
+        report["reason"] = "missing glb/gltf"
+        return report
+
+    try:
+        import pygltflib
+
+        gltf = pygltflib.GLTF2().load(str(path))
+        changed = False
+        materials = gltf.materials or []
+        for material in materials:
+            pbr = material.pbrMetallicRoughness
+            if pbr is None:
+                continue
+            if "glb_metallic_factor" in settings:
+                target = float(settings.get("glb_metallic_factor", 0.0))
+                current = 1.0 if pbr.metallicFactor is None else float(pbr.metallicFactor)
+                next_value = min(current, target)
+                if pbr.metallicFactor != next_value:
+                    pbr.metallicFactor = next_value
+                    changed = True
+            if "glb_roughness_factor" in settings:
+                target = float(settings.get("glb_roughness_factor", 1.0))
+                current = 1.0 if pbr.roughnessFactor is None else float(pbr.roughnessFactor)
+                next_value = max(current, target)
+                if pbr.roughnessFactor != next_value:
+                    pbr.roughnessFactor = next_value
+                    changed = True
+            if bool(settings.get("drop_metallic_roughness_texture", False)) and pbr.metallicRoughnessTexture is not None:
+                pbr.metallicRoughnessTexture = None
+                changed = True
+
+        if changed:
+            gltf.save(str(path))
+        report.update({"materials": len(materials), "applied": changed})
+    except Exception as exc:  # noqa: BLE001 - material cleanup must not fail a completed texture.
+        report["error"] = str(exc)
     return report
 
 

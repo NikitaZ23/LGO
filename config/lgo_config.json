@@ -176,13 +176,112 @@
       "postprocess": {
         "smooth": {
           "enabled": true,
-          "iterations": 2,
-          "alpha": 0.05,
-          "beta": 0.16
+          "iterations": 3,
+          "alpha": 0.08,
+          "beta": 0.24
         },
         "textured_smooth": {
-          "enabled": false,
-          "iterations": 0
+          "enabled": true,
+          "method": "humphrey",
+          "iterations": 3,
+          "alpha": 0.1,
+          "beta": 0.28
+        },
+        "texture_prompt": {
+          "enabled": true,
+          "save": true,
+          "contrast": 0.78,
+          "brightness": 1.16,
+          "color": 0.76,
+          "sharpness": 0.85,
+          "gamma": 0.82
+        },
+        "texture_material": {
+          "albedo_median_blend": 0.34,
+          "albedo_blur_radius": 0.55,
+          "albedo_shadow_lift": 30,
+          "albedo_brightness": 1.18,
+          "albedo_color": 0.78,
+          "albedo_contrast": 0.86,
+          "albedo_tone_balance": true,
+          "albedo_min_luma_mean": 58,
+          "albedo_target_luma_mean": 88,
+          "albedo_max_gain": 2.4,
+          "metallic_scale": 0,
+          "metallic_max": 0,
+          "roughness_lift": 180,
+          "roughness_min": 245,
+          "roughness_max": 255,
+          "glb_metallic_factor": 0,
+          "glb_roughness_factor": 1,
+          "drop_metallic_roughness_texture": false
+        },
+        "finger_guard": {
+          "enabled": false
+        },
+        "toe_guard": {
+          "enabled": false
+        },
+        "floor_plate": {
+          "enabled": false
+        }
+      }
+    },
+    "rock": {
+      "label": "Rock / stone",
+      "preprocess": {
+        "edge_feather": 0.28,
+        "detail_enhance": {
+          "enabled": true,
+          "contrast": 1.08,
+          "sharpness_radius": 0.8,
+          "sharpness_percent": 120,
+          "sharpness_threshold": 3
+        }
+      },
+      "postprocess": {
+        "smooth": {
+          "enabled": true,
+          "method": "humphrey",
+          "iterations": 5,
+          "alpha": 0.1,
+          "beta": 0.32
+        },
+        "textured_smooth": {
+          "enabled": true,
+          "method": "humphrey",
+          "iterations": 4,
+          "alpha": 0.11,
+          "beta": 0.34
+        },
+        "texture_prompt": {
+          "enabled": true,
+          "save": true,
+          "contrast": 0.74,
+          "brightness": 1.2,
+          "color": 0.68,
+          "sharpness": 0.82,
+          "gamma": 0.78
+        },
+        "texture_material": {
+          "albedo_median_blend": 0.42,
+          "albedo_blur_radius": 0.7,
+          "albedo_shadow_lift": 38,
+          "albedo_brightness": 1.22,
+          "albedo_color": 0.62,
+          "albedo_contrast": 0.82,
+          "albedo_tone_balance": true,
+          "albedo_min_luma_mean": 62,
+          "albedo_target_luma_mean": 96,
+          "albedo_max_gain": 2.8,
+          "metallic_scale": 0,
+          "metallic_max": 0,
+          "roughness_lift": 220,
+          "roughness_min": 250,
+          "roughness_max": 255,
+          "glb_metallic_factor": 0,
+          "glb_roughness_factor": 1,
+          "drop_metallic_roughness_texture": false
         },
         "finger_guard": {
           "enabled": false
