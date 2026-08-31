@@ -322,7 +322,7 @@
       "generation": {
         "texture_views": 6,
         "texture_resolution": 512,
-        "texture_remesh_target": 50000
+        "texture_remesh_target": 120000
       },
       "postprocess": {
         "textured_subdivide": {
@@ -343,7 +343,7 @@
       "generation": {
         "texture_views": 6,
         "texture_resolution": 512,
-        "texture_remesh_target": 60000
+        "texture_remesh_target": 180000
       },
       "postprocess": {
         "textured_subdivide": {

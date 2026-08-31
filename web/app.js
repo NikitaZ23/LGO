@@ -25,7 +25,6 @@ const sceneStatus = document.querySelector("#sceneStatus");
 const resultTextureToggle = document.querySelector("#resultTextureToggle");
 const resultTextureInput = document.querySelector("#resultTextureInput");
 const sceneEmpty = document.querySelector("#sceneEmpty");
-const baseModelViewer = document.querySelector("#baseModelViewer");
 const modelViewer = document.querySelector("#modelViewer");
 const sceneFrame = document.querySelector(".scene-frame");
 const viewerChoiceBar = document.querySelector("#viewerChoices");
@@ -65,7 +64,6 @@ let historyLoaded = false;
 let historyFilter = localStorage.getItem("lgo.historyFilter") || "all";
 let currentSceneFilename = "";
 let currentSceneOutputs = null;
-let baseSyncFrame = 0;
 const previewUrls = new Map();
 const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
@@ -614,37 +612,8 @@ function showSceneOutput(job, output) {
     return;
   }
   setSceneSource(job.id, output.filename, outputCacheKey(job, output));
-  const layered = setBaseSceneLayer(job, output, currentSceneOutputs);
-  sceneStatus.textContent = sceneLoadedLabel(output, layered);
+  sceneStatus.textContent = sceneLoadedLabel(output);
   updateResultTextureToggle(output, currentSceneOutputs);
-}
-
-function setBaseSceneLayer(job, selectedOutput, sceneOutputs = currentSceneOutputs) {
-  if (!baseModelViewer) {
-    return false;
-  }
-
-  const shouldLayer = isTexturedOutput(selectedOutput) && Boolean(sceneOutputs?.whiteGlb);
-  if (!shouldLayer) {
-    stopBaseViewerSync();
-    baseModelViewer.removeAttribute("src");
-    baseModelViewer.classList.add("hidden");
-    return false;
-  }
-
-  const whiteGlb = sceneOutputs.whiteGlb;
-  const url = outputUrl(job.id, whiteGlb.filename, outputCacheKey(job, whiteGlb));
-  if (baseModelViewer.getAttribute("src") !== url) {
-    baseModelViewer.src = url;
-  }
-  baseModelViewer.classList.remove("hidden");
-  startBaseViewerSync();
-  syncBaseViewerCamera(true);
-  return true;
-}
-
-function isTexturedOutput(output) {
-  return output?.filename === "textured_mesh.glb" || output?.filename === "textured_mesh_stable.glb";
 }
 
 function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOutputs) {
@@ -664,7 +633,7 @@ function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOu
     ? "Textured mesh is not available for this result."
     : !hasWhite
       ? "Only textured mesh is available for this result."
-      : "Show textured mesh over the white base mesh.";
+      : "Switch between the white mesh and textured mesh.";
   resultTextureToggle.title = title;
   resultTextureInput.title = title;
 }
@@ -701,12 +670,11 @@ function updateViewerChoiceState() {
   });
 }
 
-function sceneLoadedLabel(output, layered = false) {
+function sceneLoadedLabel(output) {
   const label = sceneChoiceLabel(output);
-  const layerLabel = layered ? `${label} + White mesh` : label;
   return output?.modified_at
-    ? `Loaded ${layerLabel} - ${output.modified_at.replace("T", " ")}`
-    : `Loaded ${layerLabel}`;
+    ? `Loaded ${label} - ${output.modified_at.replace("T", " ")}`
+    : `Loaded ${label}`;
 }
 
 function setSceneSource(jobId, filename, cacheKey = "") {
@@ -721,11 +689,6 @@ function setSceneSource(jobId, filename, cacheKey = "") {
 }
 
 function clearScene() {
-  stopBaseViewerSync();
-  if (baseModelViewer) {
-    baseModelViewer.removeAttribute("src");
-    baseModelViewer.classList.add("hidden");
-  }
   modelViewer.removeAttribute("src");
   currentSceneFilename = "";
   modelViewer.classList.add("hidden");
@@ -859,11 +822,6 @@ async function saveRating(target, rating) {
 
 function setupSmoothSceneZoom() {
   modelViewer.addEventListener("wheel", handleSceneWheel, { passive: false, capture: true });
-  modelViewer.addEventListener("camera-change", () => syncBaseViewerCamera(false));
-  modelViewer.addEventListener("load", () => syncBaseViewerCamera(true));
-  if (baseModelViewer) {
-    baseModelViewer.addEventListener("load", () => syncBaseViewerCamera(true));
-  }
   if (sceneFrame) {
     sceneFrame.addEventListener("wheel", handleSceneWheel, { passive: false, capture: true });
   }
@@ -898,9 +856,6 @@ function hasSceneModel() {
 function applySceneCameraOrbit(orbit, jump = false) {
   const value = `${orbit.theta}deg ${orbit.phi}deg ${orbit.radius}m`;
   applyViewerCameraOrbit(modelViewer, value, jump);
-  if (baseModelViewer && !baseModelViewer.classList.contains("hidden")) {
-    applyViewerCameraOrbit(baseModelViewer, value, jump);
-  }
 }
 
 function applyViewerCameraOrbit(viewer, value, jump = false) {
@@ -916,112 +871,6 @@ function applyViewerCameraOrbit(viewer, value, jump = false) {
   if (jump && typeof viewer.jumpCameraToGoal === "function") {
     viewer.jumpCameraToGoal();
   }
-}
-
-function syncBaseViewerCamera(jump = false) {
-  if (!baseModelViewer || baseModelViewer.classList.contains("hidden") || !hasSceneModel()) {
-    return;
-  }
-  const orbit = getCurrentCameraOrbit();
-  const value = `${orbit.theta}deg ${orbit.phi}deg ${orbit.radius}m`;
-  applyViewerCameraOrbit(baseModelViewer, value, jump);
-  const target = getCurrentCameraTarget();
-  if (target) {
-    applyViewerCameraTarget(baseModelViewer, target, jump);
-  }
-  const fieldOfView = getCurrentFieldOfView();
-  if (fieldOfView) {
-    applyViewerFieldOfView(baseModelViewer, fieldOfView, jump);
-  }
-}
-
-function startBaseViewerSync() {
-  if (baseSyncFrame || !baseModelViewer) {
-    return;
-  }
-
-  const tick = () => {
-    if (!baseModelViewer || baseModelViewer.classList.contains("hidden")) {
-      baseSyncFrame = 0;
-      return;
-    }
-    syncBaseViewerCamera(false);
-    baseSyncFrame = window.requestAnimationFrame(tick);
-  };
-  baseSyncFrame = window.requestAnimationFrame(tick);
-}
-
-function stopBaseViewerSync() {
-  if (!baseSyncFrame) {
-    return;
-  }
-  window.cancelAnimationFrame(baseSyncFrame);
-  baseSyncFrame = 0;
-}
-
-function getCurrentCameraTarget() {
-  if (typeof modelViewer.getCameraTarget !== "function") {
-    return null;
-  }
-  const target = modelViewer.getCameraTarget();
-  const x = targetComponentToMeters(target?.x, Number.NaN);
-  const y = targetComponentToMeters(target?.y, Number.NaN);
-  const z = targetComponentToMeters(target?.z, Number.NaN);
-  if (![x, y, z].every(Number.isFinite)) {
-    return null;
-  }
-  return `${x}m ${y}m ${z}m`;
-}
-
-function applyViewerCameraTarget(viewer, value, jump = false) {
-  if (!viewer || !value) {
-    return;
-  }
-  viewer.setAttribute("camera-target", value);
-  try {
-    viewer.cameraTarget = value;
-  } catch (error) {
-    console.warn("Could not set cameraTarget property", error);
-  }
-  if (jump && typeof viewer.jumpCameraToGoal === "function") {
-    viewer.jumpCameraToGoal();
-  }
-}
-
-function getCurrentFieldOfView() {
-  if (typeof modelViewer.getFieldOfView === "function") {
-    const value = modelViewer.getFieldOfView();
-    const degrees = cameraAngleToDegrees(value, Number.NaN);
-    return Number.isFinite(degrees) ? `${degrees}deg` : null;
-  }
-  return modelViewer.fieldOfView || modelViewer.getAttribute("field-of-view") || null;
-}
-
-function applyViewerFieldOfView(viewer, value, jump = false) {
-  if (!viewer || !value) {
-    return;
-  }
-  viewer.setAttribute("field-of-view", value);
-  try {
-    viewer.fieldOfView = value;
-  } catch (error) {
-    console.warn("Could not set fieldOfView property", error);
-  }
-  if (jump && typeof viewer.jumpCameraToGoal === "function") {
-    viewer.jumpCameraToGoal();
-  }
-}
-
-function targetComponentToMeters(value, fallback) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (value && typeof value === "object" && "value" in value) {
-    const numeric = Number.parseFloat(String(value.value));
-    return Number.isFinite(numeric) ? numeric : fallback;
-  }
-  const parsed = Number.parseFloat(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function normalizeWheelDelta(event) {

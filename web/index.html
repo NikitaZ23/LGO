@@ -9,7 +9,7 @@
     <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
     <link rel="shortcut icon" href="/favicon.ico?v=4">
-    <link rel="stylesheet" href="/styles.css?v=19">
+    <link rel="stylesheet" href="/styles.css?v=20">
     <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
   </head>
   <body>
@@ -225,20 +225,8 @@
           <div class="scene-frame">
             <div id="viewerChoices" class="scene-toolbar"></div>
             <model-viewer
-              id="baseModelViewer"
-              class="model-viewer base-model-viewer hidden"
-              rotation-per-second="8deg"
-              shadow-intensity="0"
-              exposure="1"
-              camera-orbit="0deg 78deg 12m"
-              min-camera-orbit="auto auto 0.05m"
-              max-camera-orbit="auto auto 160m"
-              min-field-of-view="10deg"
-              max-field-of-view="80deg">
-            </model-viewer>
-            <model-viewer
               id="modelViewer"
-              class="model-viewer top-model-viewer hidden"
+              class="model-viewer hidden"
               camera-controls
               auto-rotate
               rotation-per-second="8deg"
@@ -257,6 +245,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=26"></script>
+    <script src="/app.js?v=27"></script>
   </body>
 </html>
