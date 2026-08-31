@@ -1,5 +1,7 @@
 const healthStrip = document.querySelector("#healthStrip");
 const refreshHealth = document.querySelector("#refreshHealth");
+const restartServiceButton = document.querySelector("#restartService");
+const shutdownServiceButton = document.querySelector("#shutdownService");
 const form = document.querySelector("#jobForm");
 const addTextureButton = document.querySelector("#addTextureButton");
 const modeInput = document.querySelector("#mode");
@@ -172,6 +174,12 @@ fileInputs.forEach((input) => {
 });
 
 refreshHealth.addEventListener("click", loadHealth);
+if (restartServiceButton) {
+  restartServiceButton.addEventListener("click", restartService);
+}
+if (shutdownServiceButton) {
+  shutdownServiceButton.addEventListener("click", shutdownService);
+}
 if (refreshHistory) {
   refreshHistory.addEventListener("click", loadHistory);
 }
@@ -1084,6 +1092,103 @@ async function addTextureToCurrentJob() {
     jobStatus.textContent += `\n\nAdd texture failed: ${error}`;
     updateAddTextureButton(currentJob);
   }
+}
+
+async function shutdownService() {
+  if (!window.confirm("Shutdown LGO service?")) {
+    return;
+  }
+  setServiceControlsBusy(true);
+  try {
+    const payload = await postServiceCommand("shutdown");
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    healthStrip.innerHTML = badge("Server shutting down", true, true);
+    runBadge.textContent = "Stopping";
+    setProgress("needs_runtime", payload.message || "LGO shutdown command sent.");
+    appendRunMessage(payload.message || "LGO shutdown command sent.");
+  } catch (error) {
+    appendRunMessage(`Shutdown failed: ${error}`);
+    setServiceControlsBusy(false);
+  }
+}
+
+async function restartService() {
+  if (!window.confirm("Restart LGO service?")) {
+    return;
+  }
+  setServiceControlsBusy(true);
+  try {
+    const payload = await postServiceCommand("restart");
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    healthStrip.innerHTML = badge("Server restarting", true, true);
+    runBadge.textContent = "Restarting";
+    setProgress("queued", payload.message || "LGO restart command sent.");
+    appendRunMessage(payload.message || "LGO restart command sent.");
+    waitForServiceBack();
+  } catch (error) {
+    appendRunMessage(`Restart failed: ${error}`);
+    setServiceControlsBusy(false);
+  }
+}
+
+async function postServiceCommand(command) {
+  const response = await fetch(`/api/${command}`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : {};
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || payload.message || response.statusText);
+  }
+  return payload;
+}
+
+function waitForServiceBack(attempt = 0) {
+  const maxAttempts = 24;
+  window.setTimeout(async () => {
+    try {
+      const response = await fetch("/api/health", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(response.statusText);
+      }
+      setServiceControlsBusy(false);
+      runBadge.textContent = "Online";
+      setProgress("created", "LGO service restarted.");
+      await loadHealth();
+      await loadHistory();
+      restoreLastJob();
+    } catch (error) {
+      if (attempt + 1 >= maxAttempts) {
+        setServiceControlsBusy(false);
+        healthStrip.innerHTML = badge("Restart not confirmed", false);
+        setProgress("failed", "Restart was not confirmed. Start LGO with start-lgo-background.bat.");
+        appendRunMessage(`Restart check failed: ${error}`);
+        return;
+      }
+      waitForServiceBack(attempt + 1);
+    }
+  }, attempt === 0 ? 2500 : 1500);
+}
+
+function setServiceControlsBusy(busy) {
+  [refreshHealth, restartServiceButton, shutdownServiceButton].forEach((button) => {
+    if (button) {
+      button.disabled = busy;
+    }
+  });
+}
+
+function appendRunMessage(message) {
+  const prefix = jobStatus.textContent && jobStatus.textContent !== "No job yet." ? `${jobStatus.textContent}\n\n` : "";
+  jobStatus.textContent = `${prefix}${message}`;
+  jobStatus.scrollTop = jobStatus.scrollHeight;
 }
 
 function outputUrl(jobId, filename) {

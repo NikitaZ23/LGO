@@ -134,6 +134,15 @@ E:\AI\Models\Hunyuan3D-Paint-v2-1\hy3dpaint\ckpt\RealESRGAN_x4plus.pth
 http://127.0.0.1:7865
 ```
 
+В верхней панели фронта есть кнопки:
+
+- `Refresh` - обновить статус окружения;
+- `Restart` - перезапустить локальный сервис LGO;
+- `Shutdown` - выключить локальный сервис LGO.
+
+После `Shutdown` включить сервис обратно можно через `start-lgo-background.bat` или `start-lgo.bat`.
+Лог автоперезапуска пишется в `logs/service-restart.log`.
+
 ## Проверка окружения
 
 ```powershell

@@ -4,6 +4,8 @@ import argparse
 import cgi
 import json
 import mimetypes
+import subprocess
+import sys
 import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -73,6 +75,14 @@ class LGOHandler(SimpleHTTPRequestHandler):
         query = parse_qs(request_url.query)
         if request_path == "/api/shutdown":
             self._json({"ok": True, "message": "LGO shutdown command sent."})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        if request_path == "/api/restart":
+            try:
+                restart_info = _spawn_restart_helper(_server_host(self.server), _server_port(self.server))
+            except Exception as exc:  # noqa: BLE001 - surface restart setup errors to the UI.
+                return self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._json({"ok": True, "message": "LGO restart command sent.", **restart_info})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
 
@@ -397,6 +407,86 @@ def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
     return max(1, min(100, value))
 
 
+def _server_host(server) -> str:
+    return str(getattr(server, "lgo_host", CONFIG["service"]["host"]))
+
+
+def _server_port(server) -> int:
+    return int(getattr(server, "lgo_port", CONFIG["service"]["port"]))
+
+
+def _spawn_restart_helper(host: str, port: int) -> dict[str, Any]:
+    python_path = Path(sys.executable)
+    server_path = PROJECT_ROOT / "lgo_server.py"
+    if not python_path.exists():
+        raise FileNotFoundError(f"LGO Python runtime was not found: {python_path}")
+    if not server_path.exists():
+        raise FileNotFoundError(f"LGO server script was not found: {server_path}")
+
+    helper_code = r"""
+import os
+import socket
+import subprocess
+import sys
+import time
+
+server_path = sys.argv[1]
+host = sys.argv[2]
+port = int(sys.argv[3])
+project_root = sys.argv[4]
+
+time.sleep(1.2)
+deadline = time.time() + 30
+while time.time() < deadline:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.25)
+    try:
+        sock.connect((host, port))
+    except OSError:
+        break
+    finally:
+        sock.close()
+    time.sleep(0.35)
+
+log_dir = os.path.join(project_root, "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_path = os.path.join(log_dir, "service-restart.log")
+log = open(log_path, "ab", buffering=0)
+kwargs = {
+    "cwd": project_root,
+    "stdin": subprocess.DEVNULL,
+    "stdout": log,
+    "stderr": log,
+}
+if os.name == "nt":
+    kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+else:
+    kwargs["start_new_session"] = True
+
+subprocess.Popen([sys.executable, server_path, "--host", host, "--port", str(port)], **kwargs)
+"""
+
+    kwargs: dict[str, Any] = {
+        "cwd": str(PROJECT_ROOT),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+    else:
+        kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(
+        [str(python_path), "-c", helper_code, str(server_path), host, str(port), str(PROJECT_ROOT)],
+        **kwargs,
+    )
+    return {"restart_helper_pid": process.pid}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start the LGO local service.")
     parser.add_argument("--host", default=CONFIG["service"]["host"])
@@ -405,6 +495,8 @@ def main() -> None:
 
     address = (args.host, args.port)
     httpd = ThreadingHTTPServer(address, LGOHandler)
+    httpd.lgo_host = args.host
+    httpd.lgo_port = args.port
     print(f"LGO service running at http://{args.host}:{args.port}")
     httpd.serve_forever()
 

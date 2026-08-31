@@ -9,7 +9,7 @@
     <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
     <link rel="shortcut icon" href="/favicon.ico?v=4">
-    <link rel="stylesheet" href="/styles.css?v=16">
+    <link rel="stylesheet" href="/styles.css?v=17">
     <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
   </head>
   <body>
@@ -19,7 +19,11 @@
           <h1>LGO</h1>
           <p>Local Generation Object</p>
         </div>
-        <button id="refreshHealth" type="button">Refresh</button>
+        <div class="service-actions">
+          <button id="refreshHealth" type="button">Refresh</button>
+          <button id="restartService" type="button">Restart</button>
+          <button id="shutdownService" class="danger-button" type="button">Shutdown</button>
+        </div>
       </section>
 
       <section class="status-strip" id="healthStrip"></section>
@@ -235,6 +239,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=20"></script>
+    <script src="/app.js?v=21"></script>
   </body>
 </html>

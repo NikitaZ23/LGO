@@ -51,6 +51,14 @@ input {
   margin-bottom: 18px;
 }
 
+.service-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 h1,
 h2,
 p {
@@ -88,6 +96,15 @@ button:hover {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+.danger-button {
+  border-color: rgba(227, 109, 109, 0.62);
+  color: #ffc7c7;
+}
+
+.danger-button:hover {
+  border-color: var(--bad);
 }
 
 .primary {
