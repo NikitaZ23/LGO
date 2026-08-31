@@ -65,6 +65,7 @@ let historyLoaded = false;
 let historyFilter = localStorage.getItem("lgo.historyFilter") || "all";
 let currentSceneFilename = "";
 let currentSceneOutputs = null;
+let baseSyncFrame = 0;
 const previewUrls = new Map();
 const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
@@ -625,6 +626,7 @@ function setBaseSceneLayer(job, selectedOutput, sceneOutputs = currentSceneOutpu
 
   const shouldLayer = isTexturedOutput(selectedOutput) && Boolean(sceneOutputs?.whiteGlb);
   if (!shouldLayer) {
+    stopBaseViewerSync();
     baseModelViewer.removeAttribute("src");
     baseModelViewer.classList.add("hidden");
     return false;
@@ -636,6 +638,7 @@ function setBaseSceneLayer(job, selectedOutput, sceneOutputs = currentSceneOutpu
     baseModelViewer.src = url;
   }
   baseModelViewer.classList.remove("hidden");
+  startBaseViewerSync();
   syncBaseViewerCamera(true);
   return true;
 }
@@ -718,6 +721,7 @@ function setSceneSource(jobId, filename, cacheKey = "") {
 }
 
 function clearScene() {
+  stopBaseViewerSync();
   if (baseModelViewer) {
     baseModelViewer.removeAttribute("src");
     baseModelViewer.classList.add("hidden");
@@ -921,6 +925,103 @@ function syncBaseViewerCamera(jump = false) {
   const orbit = getCurrentCameraOrbit();
   const value = `${orbit.theta}deg ${orbit.phi}deg ${orbit.radius}m`;
   applyViewerCameraOrbit(baseModelViewer, value, jump);
+  const target = getCurrentCameraTarget();
+  if (target) {
+    applyViewerCameraTarget(baseModelViewer, target, jump);
+  }
+  const fieldOfView = getCurrentFieldOfView();
+  if (fieldOfView) {
+    applyViewerFieldOfView(baseModelViewer, fieldOfView, jump);
+  }
+}
+
+function startBaseViewerSync() {
+  if (baseSyncFrame || !baseModelViewer) {
+    return;
+  }
+
+  const tick = () => {
+    if (!baseModelViewer || baseModelViewer.classList.contains("hidden")) {
+      baseSyncFrame = 0;
+      return;
+    }
+    syncBaseViewerCamera(false);
+    baseSyncFrame = window.requestAnimationFrame(tick);
+  };
+  baseSyncFrame = window.requestAnimationFrame(tick);
+}
+
+function stopBaseViewerSync() {
+  if (!baseSyncFrame) {
+    return;
+  }
+  window.cancelAnimationFrame(baseSyncFrame);
+  baseSyncFrame = 0;
+}
+
+function getCurrentCameraTarget() {
+  if (typeof modelViewer.getCameraTarget !== "function") {
+    return null;
+  }
+  const target = modelViewer.getCameraTarget();
+  const x = targetComponentToMeters(target?.x, Number.NaN);
+  const y = targetComponentToMeters(target?.y, Number.NaN);
+  const z = targetComponentToMeters(target?.z, Number.NaN);
+  if (![x, y, z].every(Number.isFinite)) {
+    return null;
+  }
+  return `${x}m ${y}m ${z}m`;
+}
+
+function applyViewerCameraTarget(viewer, value, jump = false) {
+  if (!viewer || !value) {
+    return;
+  }
+  viewer.setAttribute("camera-target", value);
+  try {
+    viewer.cameraTarget = value;
+  } catch (error) {
+    console.warn("Could not set cameraTarget property", error);
+  }
+  if (jump && typeof viewer.jumpCameraToGoal === "function") {
+    viewer.jumpCameraToGoal();
+  }
+}
+
+function getCurrentFieldOfView() {
+  if (typeof modelViewer.getFieldOfView === "function") {
+    const value = modelViewer.getFieldOfView();
+    const degrees = cameraAngleToDegrees(value, Number.NaN);
+    return Number.isFinite(degrees) ? `${degrees}deg` : null;
+  }
+  return modelViewer.fieldOfView || modelViewer.getAttribute("field-of-view") || null;
+}
+
+function applyViewerFieldOfView(viewer, value, jump = false) {
+  if (!viewer || !value) {
+    return;
+  }
+  viewer.setAttribute("field-of-view", value);
+  try {
+    viewer.fieldOfView = value;
+  } catch (error) {
+    console.warn("Could not set fieldOfView property", error);
+  }
+  if (jump && typeof viewer.jumpCameraToGoal === "function") {
+    viewer.jumpCameraToGoal();
+  }
+}
+
+function targetComponentToMeters(value, fallback) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (value && typeof value === "object" && "value" in value) {
+    const numeric = Number.parseFloat(String(value.value));
+    return Number.isFinite(numeric) ? numeric : fallback;
+  }
+  const parsed = Number.parseFloat(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function normalizeWheelDelta(event) {
