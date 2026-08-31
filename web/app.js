@@ -237,7 +237,7 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-function renderJob(job) {
+function renderJob(job, options = {}) {
   currentJobId = job.id || currentJobId;
   currentJob = job;
   setProgress(job.status, job.message || job.status);
@@ -282,7 +282,7 @@ function renderJob(job) {
   }
 
   jobStatus.textContent = lines.join("\n");
-  renderOutputs(job);
+  renderOutputs(job, options);
   updateAddTextureButton(job);
   highlightHistoryJob(job.id);
   loadJobLog(job, lines.join("\n"));
@@ -468,7 +468,7 @@ async function loadHistoryJob(jobId) {
       throw new Error(job.error || response.statusText);
     }
     localStorage.setItem("lgo.lastJobId", job.id);
-    renderJob(job);
+    renderJob(job, { preferredScene: "white" });
     if (!terminalStatuses.has(job.status)) {
       pollJob(job.id);
     }
@@ -513,7 +513,7 @@ function highlightHistoryJob(jobId) {
   });
 }
 
-function renderOutputs(job) {
+function renderOutputs(job, options = {}) {
   outputLinks.innerHTML = "";
   if (viewerChoiceBar) {
     viewerChoiceBar.innerHTML = "";
@@ -523,11 +523,11 @@ function renderOutputs(job) {
   const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
     || glbOutputs.find((output) => output.filename === "textured_mesh.glb");
   const actualWhiteGlb = glbOutputs.find((output) => output.filename === "white_mesh.glb");
-  const whiteGlb = actualWhiteGlb
-    || (texturedGlb ? { format: "glb", filename: "white_mesh.glb", label: "White mesh GLB" } : null);
-  const primaryGlb = texturedGlb || glbOutputs[0] || whiteGlb;
+  const whiteGlb = actualWhiteGlb || null;
+  const fallbackGlb = glbOutputs.find((output) => output !== whiteGlb && output !== texturedGlb) || null;
+  const primaryGlb = choosePrimaryGlb(glbOutputs, whiteGlb, texturedGlb, fallbackGlb, options.preferredScene);
 
-  const viewerChoices = [whiteGlb, texturedGlb || glbOutputs[0]]
+  const viewerChoices = [whiteGlb, texturedGlb, fallbackGlb]
     .filter(Boolean)
     .filter((output, index, list) => list.findIndex((item) => item.filename === output.filename) === index);
 
@@ -582,6 +582,16 @@ function renderViewerChoices(job, choices) {
   updateViewerChoiceState();
 }
 
+function choosePrimaryGlb(glbOutputs, whiteGlb, texturedGlb, fallbackGlb, preferredScene) {
+  if (preferredScene === "white" && whiteGlb) {
+    return whiteGlb;
+  }
+  if (preferredScene === "texture" && texturedGlb) {
+    return texturedGlb;
+  }
+  return texturedGlb || whiteGlb || fallbackGlb || glbOutputs[0] || null;
+}
+
 function sceneChoiceLabel(output) {
   if (output.filename === "white_mesh.glb") {
     return "White mesh";
@@ -602,7 +612,8 @@ function updateViewerChoiceState() {
 }
 
 function sceneLoadedLabel(output) {
-  return output?.modified_at ? `Loaded ${output.modified_at.replace("T", " ")}` : "Loaded";
+  const label = sceneChoiceLabel(output);
+  return output?.modified_at ? `Loaded ${label} - ${output.modified_at.replace("T", " ")}` : `Loaded ${label}`;
 }
 
 function setSceneSource(jobId, filename, cacheKey = "") {
