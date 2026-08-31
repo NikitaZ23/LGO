@@ -96,10 +96,10 @@ class JobStore:
             job["outputs"] = outputs
         return job
 
-    def collect_outputs(self, job: dict[str, Any]) -> list[dict[str, str]]:
+    def collect_outputs(self, job: dict[str, Any]) -> list[dict[str, Any]]:
         output_dir_text = str(job.get("output_dir") or "")
         output_dir = Path(output_dir_text) if output_dir_text else None
-        outputs: list[dict[str, str]] = []
+        outputs: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         for output in job.get("outputs", []):
@@ -107,12 +107,14 @@ class JobStore:
             fmt = str(output.get("format", Path(filename).suffix.lstrip(".").lower())).lower()
             if not self.is_public_output(filename, fmt) or filename in seen:
                 continue
+            metadata = self.output_metadata(output_dir / filename if output_dir else None)
             outputs.append(
                 {
                     "format": fmt,
                     "filename": filename,
                     "path": str(output_dir / filename) if output_dir else filename,
                     "label": str(output.get("label") or self.output_label(filename, fmt)),
+                    **metadata,
                 }
             )
             seen.add(filename)
@@ -129,18 +131,29 @@ class JobStore:
                         "filename": filename,
                         "path": str(path),
                         "label": self.output_label(filename, fmt),
+                        **self.output_metadata(path),
                     }
                 )
                 seen.add(filename)
         return outputs
 
-    def preferred_glb(self, outputs: list[dict[str, str]]) -> dict[str, str] | None:
+    def preferred_glb(self, outputs: list[dict[str, Any]]) -> dict[str, Any] | None:
         glbs = [output for output in outputs if output.get("format") == "glb"]
         for filename in PREFERRED_GLB_OUTPUTS:
             for output in glbs:
                 if output.get("filename") == filename:
                     return output
         return glbs[0] if glbs else None
+
+    def output_metadata(self, path: Path | None) -> dict[str, Any]:
+        if path is None or not path.exists():
+            return {}
+        stat = path.stat()
+        return {
+            "size": stat.st_size,
+            "modified_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
+            "cache_key": str(stat.st_mtime_ns),
+        }
 
     def display_name(self, job: dict[str, Any]) -> str:
         created_at = str(job.get("created_at", "")).replace("T", " ")

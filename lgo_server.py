@@ -243,7 +243,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
                 handle.write(item.file.read())
             payload["input_files"][field] = str(target)
 
-    def _serve_file(self, path: Path) -> None:
+    def _serve_file(self, path: Path, cache_control: str | None = None) -> None:
         if not path.exists():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -251,7 +251,9 @@ class LGOHandler(SimpleHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         self.send_header("Content-Length", str(len(content)))
-        if path.name == "index.html" or path.name.startswith("favicon") or path.name == "apple-touch-icon.png":
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
+        elif path.name == "index.html" or path.name.startswith("favicon") or path.name == "apple-touch-icon.png":
             self.send_header("Cache-Control", "no-store, max-age=0")
         self.end_headers()
         self.wfile.write(content)
@@ -261,7 +263,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
         path = (output_dir / Path(filename).name).resolve()
         if output_dir not in path.parents and path != output_dir:
             return self._json({"error": "Invalid output path."}, HTTPStatus.BAD_REQUEST)
-        return self._serve_file(path)
+        return self._serve_file(path, cache_control="no-store, max-age=0")
 
     def _serve_job_log(self, job: dict[str, Any]) -> None:
         log_path = Path(job.get("log") or Path(job["run_dir"]) / "run.log").resolve()

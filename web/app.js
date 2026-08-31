@@ -531,22 +531,22 @@ function renderOutputs(job) {
     .filter(Boolean)
     .filter((output, index, list) => list.findIndex((item) => item.filename === output.filename) === index);
 
-  renderViewerChoices(job.id, viewerChoices);
+  renderViewerChoices(job, viewerChoices);
   renderRatings(job, actualWhiteGlb, texturedGlb);
 
   outputs.forEach((output) => {
     const link = document.createElement("a");
-    link.href = outputUrl(job.id, output.filename);
+    link.href = outputUrl(job.id, output.filename, outputCacheKey(job, output));
     link.textContent = output.label || output.format.toUpperCase();
     link.target = "_blank";
     outputLinks.appendChild(link);
   });
 
   if (primaryGlb) {
-    setSceneSource(job.id, primaryGlb.filename);
+    setSceneSource(job.id, primaryGlb.filename, outputCacheKey(job, primaryGlb));
     modelViewer.classList.remove("hidden");
     sceneEmpty.classList.add("hidden");
-    sceneStatus.textContent = "Loaded";
+    sceneStatus.textContent = sceneLoadedLabel(primaryGlb);
     return;
   }
 
@@ -564,7 +564,7 @@ function renderOutputs(job) {
   modelViewer.classList.add("hidden");
 }
 
-function renderViewerChoices(jobId, choices) {
+function renderViewerChoices(job, choices) {
   if (!viewerChoiceBar) {
     return;
   }
@@ -574,8 +574,9 @@ function renderViewerChoices(jobId, choices) {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.filename = output.filename;
+    button.dataset.cacheKey = outputCacheKey(job, output);
     button.textContent = sceneChoiceLabel(output);
-    button.addEventListener("click", () => setSceneSource(jobId, output.filename));
+    button.addEventListener("click", () => setSceneSource(job.id, output.filename, outputCacheKey(job, output)));
     viewerChoiceBar.appendChild(button);
   });
   updateViewerChoiceState();
@@ -600,8 +601,12 @@ function updateViewerChoiceState() {
   });
 }
 
-function setSceneSource(jobId, filename) {
-  const url = outputUrl(jobId, filename);
+function sceneLoadedLabel(output) {
+  return output?.modified_at ? `Loaded ${output.modified_at.replace("T", " ")}` : "Loaded";
+}
+
+function setSceneSource(jobId, filename, cacheKey = "") {
+  const url = outputUrl(jobId, filename, cacheKey);
   currentSceneFilename = filename;
   updateViewerChoiceState();
   if (modelViewer.getAttribute("src") === url) {
@@ -1191,8 +1196,13 @@ function appendRunMessage(message) {
   jobStatus.scrollTop = jobStatus.scrollHeight;
 }
 
-function outputUrl(jobId, filename) {
-  return `/api/jobs/${encodeURIComponent(jobId)}/outputs/${encodeURIComponent(filename)}`;
+function outputCacheKey(job, output) {
+  return output?.cache_key || output?.modified_at || job?.updated_at || job?.id || "";
+}
+
+function outputUrl(jobId, filename, cacheKey = "") {
+  const base = `/api/jobs/${encodeURIComponent(jobId)}/outputs/${encodeURIComponent(filename)}`;
+  return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }
 
 function readableStatus(status) {
