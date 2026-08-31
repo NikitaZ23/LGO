@@ -9,7 +9,7 @@
     <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
     <link rel="shortcut icon" href="/favicon.ico?v=4">
-    <link rel="stylesheet" href="/styles.css?v=17">
+    <link rel="stylesheet" href="/styles.css?v=18">
     <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
   </head>
   <body>
@@ -214,7 +214,13 @@
         <section class="panel scene-panel">
           <div class="section-title compact-title">
             <h2>Result</h2>
-            <span id="sceneStatus" class="scene-status">Waiting</span>
+            <div class="result-title-actions">
+              <label id="resultTextureToggle" class="result-texture-toggle hidden">
+                <input id="resultTextureInput" type="checkbox" disabled>
+                <span>Показать с текстурой</span>
+              </label>
+              <span id="sceneStatus" class="scene-status">Waiting</span>
+            </div>
           </div>
           <div class="scene-frame">
             <div id="viewerChoices" class="scene-toolbar"></div>
@@ -239,6 +245,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=23"></script>
+    <script src="/app.js?v=24"></script>
   </body>
 </html>

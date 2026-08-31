@@ -402,6 +402,51 @@ button:disabled {
   line-height: 1;
 }
 
+.result-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.result-texture-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.result-texture-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.result-texture-toggle:has(input:disabled) {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.result-texture-toggle:has(input:disabled) input {
+  cursor: not-allowed;
+}
+
+.result-texture-toggle.hidden {
+  display: none;
+}
+
 .progress-track {
   width: 100%;
   height: 12px;

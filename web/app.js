@@ -22,6 +22,8 @@ const progressPercent = document.querySelector("#progressPercent");
 const progressStatus = document.querySelector("#progressStatus");
 const runBadge = document.querySelector("#runBadge");
 const sceneStatus = document.querySelector("#sceneStatus");
+const resultTextureToggle = document.querySelector("#resultTextureToggle");
+const resultTextureInput = document.querySelector("#resultTextureInput");
 const sceneEmpty = document.querySelector("#sceneEmpty");
 const modelViewer = document.querySelector("#modelViewer");
 const sceneFrame = document.querySelector(".scene-frame");
@@ -61,6 +63,7 @@ let historyJobs = [];
 let historyLoaded = false;
 let historyFilter = localStorage.getItem("lgo.historyFilter") || "all";
 let currentSceneFilename = "";
+let currentSceneOutputs = null;
 const previewUrls = new Map();
 const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
@@ -182,6 +185,9 @@ if (shutdownServiceButton) {
 }
 if (refreshHistory) {
   refreshHistory.addEventListener("click", loadHistory);
+}
+if (resultTextureInput) {
+  resultTextureInput.addEventListener("change", () => toggleResultTexture(resultTextureInput.checked));
 }
 
 historyFilterButtons.forEach((button) => {
@@ -519,20 +525,17 @@ function renderOutputs(job, options = {}) {
     viewerChoiceBar.innerHTML = "";
   }
   const outputs = job.outputs || [];
-  const glbOutputs = outputs.filter((output) => output.format === "glb");
-  const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
-    || glbOutputs.find((output) => output.filename === "textured_mesh.glb");
-  const actualWhiteGlb = glbOutputs.find((output) => output.filename === "white_mesh.glb");
-  const whiteGlb = actualWhiteGlb || null;
-  const fallbackGlb = glbOutputs.find((output) => output !== whiteGlb && output !== texturedGlb) || null;
-  const primaryGlb = choosePrimaryGlb(glbOutputs, whiteGlb, texturedGlb, fallbackGlb, options.preferredScene);
+  const sceneOutputs = collectSceneOutputs(job);
+  const { glbOutputs, whiteGlb, texturedGlb, fallbackGlb } = sceneOutputs;
+  currentSceneOutputs = sceneOutputs;
+  const primaryGlb = choosePrimaryGlb(sceneOutputs, options.preferredScene);
 
   const viewerChoices = [whiteGlb, texturedGlb, fallbackGlb]
     .filter(Boolean)
     .filter((output, index, list) => list.findIndex((item) => item.filename === output.filename) === index);
 
   renderViewerChoices(job, viewerChoices);
-  renderRatings(job, actualWhiteGlb, texturedGlb);
+  renderRatings(job, whiteGlb, texturedGlb);
 
   outputs.forEach((output) => {
     const link = document.createElement("a");
@@ -543,12 +546,13 @@ function renderOutputs(job, options = {}) {
   });
 
   if (primaryGlb) {
-    setSceneSource(job.id, primaryGlb.filename, outputCacheKey(job, primaryGlb));
+    showSceneOutput(job, primaryGlb);
     modelViewer.classList.remove("hidden");
     sceneEmpty.classList.add("hidden");
-    sceneStatus.textContent = sceneLoadedLabel(primaryGlb);
     return;
   }
+
+  updateResultTextureToggle(null, null);
 
   if (terminalStatuses.has(job.status) && outputs.length) {
     sceneStatus.textContent = "No GLB";
@@ -576,13 +580,24 @@ function renderViewerChoices(job, choices) {
     button.dataset.filename = output.filename;
     button.dataset.cacheKey = outputCacheKey(job, output);
     button.textContent = sceneChoiceLabel(output);
-    button.addEventListener("click", () => setSceneSource(job.id, output.filename, outputCacheKey(job, output)));
+    button.addEventListener("click", () => showSceneOutput(job, output));
     viewerChoiceBar.appendChild(button);
   });
   updateViewerChoiceState();
 }
 
-function choosePrimaryGlb(glbOutputs, whiteGlb, texturedGlb, fallbackGlb, preferredScene) {
+function collectSceneOutputs(job) {
+  const glbOutputs = (job?.outputs || []).filter((output) => output.format === "glb");
+  const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
+    || glbOutputs.find((output) => output.filename === "textured_mesh.glb")
+    || null;
+  const whiteGlb = glbOutputs.find((output) => output.filename === "white_mesh.glb") || null;
+  const fallbackGlb = glbOutputs.find((output) => output !== whiteGlb && output !== texturedGlb) || null;
+  return { glbOutputs, whiteGlb, texturedGlb, fallbackGlb };
+}
+
+function choosePrimaryGlb(sceneOutputs, preferredScene) {
+  const { glbOutputs, whiteGlb, texturedGlb, fallbackGlb } = sceneOutputs;
   if (preferredScene === "white" && whiteGlb) {
     return whiteGlb;
   }
@@ -590,6 +605,50 @@ function choosePrimaryGlb(glbOutputs, whiteGlb, texturedGlb, fallbackGlb, prefer
     return texturedGlb;
   }
   return texturedGlb || whiteGlb || fallbackGlb || glbOutputs[0] || null;
+}
+
+function showSceneOutput(job, output) {
+  if (!job?.id || !output) {
+    return;
+  }
+  setSceneSource(job.id, output.filename, outputCacheKey(job, output));
+  sceneStatus.textContent = sceneLoadedLabel(output);
+  updateResultTextureToggle(output, currentSceneOutputs);
+}
+
+function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOutputs) {
+  if (!resultTextureToggle || !resultTextureInput) {
+    return;
+  }
+  const hasWhite = Boolean(sceneOutputs?.whiteGlb);
+  const hasTexture = Boolean(sceneOutputs?.texturedGlb);
+  const selectedFilename = selectedOutput?.filename || currentSceneFilename;
+  const texturedFilename = sceneOutputs?.texturedGlb?.filename || "";
+  const isTextured = hasTexture && (!hasWhite || selectedFilename === texturedFilename);
+
+  resultTextureToggle.classList.toggle("hidden", !hasWhite && !hasTexture);
+  resultTextureInput.disabled = !hasTexture || !hasWhite;
+  resultTextureInput.checked = isTextured;
+  const title = !hasTexture
+    ? "Textured mesh is not available for this result."
+    : !hasWhite
+      ? "Only textured mesh is available for this result."
+      : "Switch between white and textured result.";
+  resultTextureToggle.title = title;
+  resultTextureInput.title = title;
+}
+
+function toggleResultTexture(showTexture) {
+  if (!currentJob) {
+    return;
+  }
+  const sceneOutputs = currentSceneOutputs || collectSceneOutputs(currentJob);
+  const target = showTexture ? sceneOutputs.texturedGlb : sceneOutputs.whiteGlb;
+  if (!target) {
+    updateResultTextureToggle(null, sceneOutputs);
+    return;
+  }
+  showSceneOutput(currentJob, target);
 }
 
 function sceneChoiceLabel(output) {
@@ -642,6 +701,8 @@ function clearScene() {
     ratingPanel.innerHTML = "";
     ratingPanel.classList.add("hidden");
   }
+  currentSceneOutputs = null;
+  updateResultTextureToggle(null, null);
 }
 
 function renderRatings(job, whiteGlb, texturedGlb) {
