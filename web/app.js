@@ -25,6 +25,7 @@ const sceneStatus = document.querySelector("#sceneStatus");
 const resultTextureToggle = document.querySelector("#resultTextureToggle");
 const resultTextureInput = document.querySelector("#resultTextureInput");
 const sceneEmpty = document.querySelector("#sceneEmpty");
+const baseModelViewer = document.querySelector("#baseModelViewer");
 const modelViewer = document.querySelector("#modelViewer");
 const sceneFrame = document.querySelector(".scene-frame");
 const viewerChoiceBar = document.querySelector("#viewerChoices");
@@ -612,8 +613,35 @@ function showSceneOutput(job, output) {
     return;
   }
   setSceneSource(job.id, output.filename, outputCacheKey(job, output));
-  sceneStatus.textContent = sceneLoadedLabel(output);
+  const layered = setBaseSceneLayer(job, output, currentSceneOutputs);
+  sceneStatus.textContent = sceneLoadedLabel(output, layered);
   updateResultTextureToggle(output, currentSceneOutputs);
+}
+
+function setBaseSceneLayer(job, selectedOutput, sceneOutputs = currentSceneOutputs) {
+  if (!baseModelViewer) {
+    return false;
+  }
+
+  const shouldLayer = isTexturedOutput(selectedOutput) && Boolean(sceneOutputs?.whiteGlb);
+  if (!shouldLayer) {
+    baseModelViewer.removeAttribute("src");
+    baseModelViewer.classList.add("hidden");
+    return false;
+  }
+
+  const whiteGlb = sceneOutputs.whiteGlb;
+  const url = outputUrl(job.id, whiteGlb.filename, outputCacheKey(job, whiteGlb));
+  if (baseModelViewer.getAttribute("src") !== url) {
+    baseModelViewer.src = url;
+  }
+  baseModelViewer.classList.remove("hidden");
+  syncBaseViewerCamera(true);
+  return true;
+}
+
+function isTexturedOutput(output) {
+  return output?.filename === "textured_mesh.glb" || output?.filename === "textured_mesh_stable.glb";
 }
 
 function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOutputs) {
@@ -633,7 +661,7 @@ function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOu
     ? "Textured mesh is not available for this result."
     : !hasWhite
       ? "Only textured mesh is available for this result."
-      : "Switch between white and textured result.";
+      : "Show textured mesh over the white base mesh.";
   resultTextureToggle.title = title;
   resultTextureInput.title = title;
 }
@@ -670,9 +698,12 @@ function updateViewerChoiceState() {
   });
 }
 
-function sceneLoadedLabel(output) {
+function sceneLoadedLabel(output, layered = false) {
   const label = sceneChoiceLabel(output);
-  return output?.modified_at ? `Loaded ${label} - ${output.modified_at.replace("T", " ")}` : `Loaded ${label}`;
+  const layerLabel = layered ? `${label} + White mesh` : label;
+  return output?.modified_at
+    ? `Loaded ${layerLabel} - ${output.modified_at.replace("T", " ")}`
+    : `Loaded ${layerLabel}`;
 }
 
 function setSceneSource(jobId, filename, cacheKey = "") {
@@ -687,6 +718,10 @@ function setSceneSource(jobId, filename, cacheKey = "") {
 }
 
 function clearScene() {
+  if (baseModelViewer) {
+    baseModelViewer.removeAttribute("src");
+    baseModelViewer.classList.add("hidden");
+  }
   modelViewer.removeAttribute("src");
   currentSceneFilename = "";
   modelViewer.classList.add("hidden");
@@ -820,6 +855,11 @@ async function saveRating(target, rating) {
 
 function setupSmoothSceneZoom() {
   modelViewer.addEventListener("wheel", handleSceneWheel, { passive: false, capture: true });
+  modelViewer.addEventListener("camera-change", () => syncBaseViewerCamera(false));
+  modelViewer.addEventListener("load", () => syncBaseViewerCamera(true));
+  if (baseModelViewer) {
+    baseModelViewer.addEventListener("load", () => syncBaseViewerCamera(true));
+  }
   if (sceneFrame) {
     sceneFrame.addEventListener("wheel", handleSceneWheel, { passive: false, capture: true });
   }
@@ -853,15 +893,34 @@ function hasSceneModel() {
 
 function applySceneCameraOrbit(orbit, jump = false) {
   const value = `${orbit.theta}deg ${orbit.phi}deg ${orbit.radius}m`;
-  modelViewer.setAttribute("camera-orbit", value);
+  applyViewerCameraOrbit(modelViewer, value, jump);
+  if (baseModelViewer && !baseModelViewer.classList.contains("hidden")) {
+    applyViewerCameraOrbit(baseModelViewer, value, jump);
+  }
+}
+
+function applyViewerCameraOrbit(viewer, value, jump = false) {
+  if (!viewer) {
+    return;
+  }
+  viewer.setAttribute("camera-orbit", value);
   try {
-    modelViewer.cameraOrbit = value;
+    viewer.cameraOrbit = value;
   } catch (error) {
     console.warn("Could not set cameraOrbit property", error);
   }
-  if (jump && typeof modelViewer.jumpCameraToGoal === "function") {
-    modelViewer.jumpCameraToGoal();
+  if (jump && typeof viewer.jumpCameraToGoal === "function") {
+    viewer.jumpCameraToGoal();
   }
+}
+
+function syncBaseViewerCamera(jump = false) {
+  if (!baseModelViewer || baseModelViewer.classList.contains("hidden") || !hasSceneModel()) {
+    return;
+  }
+  const orbit = getCurrentCameraOrbit();
+  const value = `${orbit.theta}deg ${orbit.phi}deg ${orbit.radius}m`;
+  applyViewerCameraOrbit(baseModelViewer, value, jump);
 }
 
 function normalizeWheelDelta(event) {

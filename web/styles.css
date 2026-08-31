@@ -656,6 +656,16 @@ button:disabled {
   touch-action: none;
 }
 
+.base-model-viewer {
+  z-index: 2;
+  opacity: 0.86;
+  pointer-events: none;
+}
+
+.top-model-viewer {
+  z-index: 3;
+}
+
 .scene-empty {
   position: absolute;
   inset: 0;
