@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--texture-only", action="store_true")
     args = parser.parse_args()
 
-    config = _read_json(args.config)
+    config = _read_config(args.config)
     job = _read_json(args.job)
     _setup_runtime(config)
 
@@ -317,6 +317,8 @@ def _install_hunyuan_shape_aliases() -> None:
 
 def _load_shape_pipeline(config: dict[str, Any], mode: str):
     source_dir = Path(config["paths"]["hunyuan_source_dir"])
+    if not source_dir.exists():
+        raise FileNotFoundError(f"Hunyuan3D source folder was not found: {source_dir}")
     os.chdir(source_dir)
 
     try:
@@ -1781,9 +1783,24 @@ def _output(fmt: str, path: Path, label: str) -> dict[str, str]:
     }
 
 
+def _read_config(path: Path) -> dict[str, Any]:
+    config = _read_json(path)
+    return _expand_config_tokens(config, path.resolve().parents[1])
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _expand_config_tokens(value: Any, project_root: Path) -> Any:
+    if isinstance(value, dict):
+        return {key: _expand_config_tokens(item, project_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_config_tokens(item, project_root) for item in value]
+    if isinstance(value, str):
+        return value.replace("{project_root}", str(project_root))
+    return value
 
 
 def _update_job(job_path: Path, status: str, message: str, **extra: Any) -> None:
