@@ -233,6 +233,8 @@ button:disabled {
   left: 12px;
   top: 10px;
   z-index: 2;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
   border: 1px solid rgba(48, 55, 67, 0.72);
   border-radius: 6px;
   background: rgba(13, 15, 18, 0.7);
@@ -240,6 +242,8 @@ button:disabled {
   padding: 5px 8px;
   font-size: 13px;
   line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drop-placeholder {
@@ -247,9 +251,22 @@ button:disabled {
   text-align: center;
 }
 
-.preview-drop.has-preview .drop-title,
 .preview-drop.has-preview .drop-placeholder {
   display: none;
+}
+
+.preview-drop.has-preview .drop-title {
+  display: none;
+}
+
+#multiFields .preview-drop .drop-title {
+  border-color: rgba(118, 168, 255, 0.58);
+  background: rgba(13, 15, 18, 0.84);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+#multiFields .preview-drop.has-preview .drop-title {
+  display: inline-block;
 }
 
 .preview-image {
