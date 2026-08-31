@@ -29,7 +29,12 @@ if not exist "%LGO_PYTHON%" (
 cd /d "%LGO_ROOT%"
 start "" "http://localhost:%PORT%/"
 "%LGO_PYTHON%" lgo_server.py --host 127.0.0.1 --port %PORT%
+set "LGO_EXIT=%ERRORLEVEL%"
 
 echo.
 echo LGO stopped.
-pause
+if not "%LGO_EXIT%"=="0" (
+  echo Server exited with error code %LGO_EXIT%.
+  pause
+)
+exit /b %LGO_EXIT%
