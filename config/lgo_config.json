@@ -257,23 +257,29 @@
         "texture_prompt": {
           "enabled": true,
           "save": true,
-          "contrast": 0.92,
-          "brightness": 1.04,
-          "color": 0.98,
+          "contrast": 1.02,
+          "brightness": 1.0,
+          "color": 0.92,
           "sharpness": 1.04,
-          "gamma": 0.92
+          "gamma": 1.0,
+          "border_dark_background": {
+            "enabled": true,
+            "threshold": 18,
+            "fill": [72, 68, 64],
+            "blend": 1.0
+          }
         },
         "texture_material": {
-          "albedo_median_blend": 0.16,
-          "albedo_blur_radius": 0.28,
-          "albedo_shadow_lift": 10,
-          "albedo_brightness": 0.96,
-          "albedo_color": 0.98,
-          "albedo_contrast": 1.04,
+          "albedo_median_blend": 0.22,
+          "albedo_blur_radius": 0.24,
+          "albedo_shadow_lift": 2,
+          "albedo_brightness": 0.92,
+          "albedo_color": 0.9,
+          "albedo_contrast": 1.08,
           "albedo_tone_balance": true,
           "albedo_min_luma_mean": 34,
-          "albedo_target_luma_mean": 72,
-          "albedo_max_gain": 1.45,
+          "albedo_target_luma_mean": 68,
+          "albedo_max_gain": 1.15,
           "metallic_scale": 0,
           "metallic_max": 0,
           "roughness_lift": 140,
@@ -286,15 +292,23 @@
         "texture_bake": {
           "enabled": true,
           "palette_match": true,
-          "palette_blend": 0.42,
-          "saturation": 1.0,
-          "contrast": 1.05,
+          "palette_blend": 0.55,
+          "saturation": 0.88,
+          "contrast": 1.08,
           "brightness": 0.96,
-          "gamma": 1.03,
+          "gamma": 1.02,
           "albedo_gain": 1.0,
           "target_luma_mean": 68,
-          "min_luma_gain": 0.78,
-          "max_luma_gain": 1.18
+          "min_luma_gain": 0.88,
+          "max_luma_gain": 1.12,
+          "dark_spot_cleanup": {
+            "enabled": true,
+            "max_luma": 38,
+            "target_luma": 58,
+            "target_rgb": [72, 68, 64],
+            "target_blend": 0.35,
+            "blend": 0.5
+          }
         },
         "finger_guard": {
           "enabled": false

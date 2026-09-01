@@ -1972,9 +1972,66 @@ def _adjust_baked_vertex_colors(colors, config: dict[str, Any], reference_image:
         report["applied"] = True
     report["albedo_gain"] = albedo_gain
 
+    dark_spot_report = _clean_dark_baked_spots(adjusted, settings)
+    if dark_spot_report.get("applied"):
+        adjusted = dark_spot_report.pop("colors")
+        report["applied"] = True
+    report["dark_spot_cleanup"] = dark_spot_report
+
     adjusted = np.clip(adjusted, 0, 255).astype(np.float32)
     report["stats_after"] = _color_array_stats(adjusted)
     return adjusted, report
+
+
+def _clean_dark_baked_spots(colors, settings: dict[str, Any]) -> dict[str, Any]:
+    cleanup = settings.get("dark_spot_cleanup", {})
+    report: dict[str, Any] = {"enabled": bool(cleanup.get("enabled", False)), "applied": False}
+    if not report["enabled"]:
+        return report
+
+    import numpy as np
+
+    adjusted = np.asarray(colors, dtype=np.float32).copy()
+    if adjusted.size == 0:
+        report["reason"] = "empty colors"
+        return report
+
+    luma = _rgb_luma(adjusted)
+    max_luma = float(cleanup.get("max_luma", 38))
+    mask = luma < max_luma
+    pixels = int(np.count_nonzero(mask))
+    report.update({"max_luma": max_luma, "pixels": pixels})
+    if pixels <= 0:
+        report["reason"] = "no dark spot candidates"
+        return report
+
+    target_luma = max(max_luma, float(cleanup.get("target_luma", 58)))
+    target_rgb = np.asarray(cleanup.get("target_rgb", [72, 68, 64]), dtype=np.float32)
+    if target_rgb.size != 3:
+        target_rgb = np.asarray([72, 68, 64], dtype=np.float32)
+    target_rgb = np.clip(target_rgb, 0, 255)
+    target_blend = max(0.0, min(1.0, float(cleanup.get("target_blend", 0.35))))
+    blend = max(0.0, min(1.0, float(cleanup.get("blend", 0.5))))
+    if blend <= 0:
+        report["reason"] = "blend disabled"
+        return report
+
+    dark_colors = adjusted[mask]
+    dark_luma = np.maximum(luma[mask], 1.0)[:, None]
+    lifted = dark_colors * np.clip(target_luma / dark_luma, 1.0, 3.0)
+    neutral_lift = lifted * (1.0 - target_blend) + target_rgb * target_blend
+    adjusted[mask] = dark_colors * (1.0 - blend) + neutral_lift * blend
+    report.update(
+        {
+            "applied": True,
+            "target_luma": target_luma,
+            "target_rgb": [int(value) for value in target_rgb],
+            "target_blend": round(target_blend, 4),
+            "blend": round(blend, 4),
+        }
+    )
+    report["colors"] = adjusted
+    return report
 
 
 def _reference_palette_match(colors, reference_image: Image.Image | None, settings: dict[str, Any]) -> dict[str, Any]:
@@ -2100,6 +2157,8 @@ def _prepare_texture_prompt_image(images, config: dict[str, Any], output_dir: Pa
     image = Image.new("RGB", source.size, (255, 255, 255))
     image.paste(source.convert("RGB"), mask=source.getchannel("A"))
     report["mean_before"] = _image_mean(image)
+    image, background_report = _replace_border_dark_background(image, settings)
+    report["border_dark_background"] = background_report
 
     gamma = float(settings.get("gamma", 1.0))
     if gamma > 0 and abs(gamma - 1.0) > 0.001:
@@ -2133,6 +2192,75 @@ def _prepare_texture_prompt_image(images, config: dict[str, Any], output_dir: Pa
         image.save(target)
         report["path"] = str(target)
     return image, report
+
+
+def _replace_border_dark_background(image: Image.Image, settings: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
+    cleanup = settings.get("border_dark_background", {})
+    report: dict[str, Any] = {"enabled": bool(cleanup.get("enabled", False)), "applied": False}
+    if not report["enabled"]:
+        return image, report
+
+    try:
+        import numpy as np
+        from collections import deque
+
+        array = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
+        height, width = array.shape[:2]
+        if height <= 0 or width <= 0:
+            report["reason"] = "empty image"
+            return image, report
+
+        luma = (
+            array[:, :, 0].astype(np.float32) * 0.2126
+            + array[:, :, 1].astype(np.float32) * 0.7152
+            + array[:, :, 2].astype(np.float32) * 0.0722
+        )
+        threshold = float(cleanup.get("threshold", 18))
+        candidates = luma <= threshold
+        visited = np.zeros((height, width), dtype=bool)
+        queue: deque[tuple[int, int]] = deque()
+
+        def enqueue(y: int, x: int) -> None:
+            if candidates[y, x] and not visited[y, x]:
+                visited[y, x] = True
+                queue.append((y, x))
+
+        for x in range(width):
+            enqueue(0, x)
+            enqueue(height - 1, x)
+        for y in range(1, height - 1):
+            enqueue(y, 0)
+            enqueue(y, width - 1)
+
+        while queue:
+            y, x = queue.popleft()
+            if y > 0:
+                enqueue(y - 1, x)
+            if y + 1 < height:
+                enqueue(y + 1, x)
+            if x > 0:
+                enqueue(y, x - 1)
+            if x + 1 < width:
+                enqueue(y, x + 1)
+
+        pixels = int(visited.sum())
+        report.update({"threshold": threshold, "pixels": pixels})
+        if pixels <= 0:
+            report["reason"] = "no border-connected dark background"
+            return image, report
+
+        fill = np.asarray(cleanup.get("fill", [255, 255, 255]), dtype=np.float32)
+        if fill.size != 3:
+            fill = np.asarray([255, 255, 255], dtype=np.float32)
+        fill = np.clip(fill, 0, 255)
+        blend = max(0.0, min(1.0, float(cleanup.get("blend", 1.0))))
+        source_pixels = array[visited].astype(np.float32)
+        array[visited] = np.clip(source_pixels * (1.0 - blend) + fill * blend, 0, 255).astype(np.uint8)
+        report.update({"applied": True, "fill": [int(value) for value in fill], "blend": round(blend, 4)})
+        return Image.fromarray(array, mode="RGB"), report
+    except Exception as exc:  # noqa: BLE001 - prompt cleanup should not block texture generation.
+        report["error"] = str(exc)
+        return image, report
 
 
 def _stabilize_albedo_map(path: Path, settings: dict[str, Any]) -> dict[str, Any]:
