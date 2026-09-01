@@ -7,6 +7,7 @@ set "LGO_PYTHON=%LGO_ROOT%.venv\Scripts\python.exe"
 set "LGO_RUNS_DIR=%LGO_ROOT%runs"
 set "LGO_LOG_DIR=%LGO_ROOT%logs"
 set "LGO_CACHE_DIR=%LGO_ROOT%.cache"
+set "LGO_START_SCRIPT=%LGO_ROOT%scripts\start_background.ps1"
 set "HF_HOME=%LGO_CACHE_DIR%\huggingface"
 set "HF_HUB_CACHE=%HF_HOME%\hub"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
@@ -26,4 +27,12 @@ if not exist "%LGO_PYTHON%" (
   exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$port = [int]$env:PORT; $root = [IO.Path]::GetFullPath($env:LGO_ROOT); $python = $env:LGO_PYTHON; $server = Join-Path $root 'lgo_server.py'; $existing = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if (-not $existing) { Start-Process -FilePath $python -ArgumentList @($server, '--host', '127.0.0.1', '--port', [string]$port) -WorkingDirectory $root -WindowStyle Hidden }; Start-Process ('http://localhost:' + $port + '/')"
+if not exist "%LGO_START_SCRIPT%" (
+  echo LGO background start helper was not found:
+  echo   %LGO_START_SCRIPT%
+  pause
+  exit /b 1
+)
+
+start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%LGO_START_SCRIPT%"
+exit /b 0
