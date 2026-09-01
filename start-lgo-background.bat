@@ -2,6 +2,9 @@
 setlocal
 
 set "LGO_ROOT=%~dp0"
+set "LGO_PREFERRED_ROOT=E:\AI\Projects\LGO"
+if exist "%LGO_PREFERRED_ROOT%\lgo_server.py" set "LGO_ROOT=%LGO_PREFERRED_ROOT%\"
+if defined LGO_HOME if exist "%LGO_HOME%\lgo_server.py" set "LGO_ROOT=%LGO_HOME%\"
 set "PORT=7865"
 set "LGO_PYTHON=%LGO_ROOT%.venv\Scripts\python.exe"
 set "LGO_RUNS_DIR=%LGO_ROOT%runs"

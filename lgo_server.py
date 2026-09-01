@@ -63,8 +63,16 @@ class LGOHandler(SimpleHTTPRequestHandler):
             "/apple-touch-icon.png",
         }:
             return self._serve_file(WEB_ROOT / request_path.lstrip("/"))
+        if request_path == "/api/service-info":
+            return self._json({"ok": True, "project_root": str(PROJECT_ROOT), "runs_dir": str(RUNS_DIR)})
         if request_path == "/api/health":
-            return self._json(check_environment(CONFIG))
+            return self._json(
+                {
+                    **check_environment(CONFIG),
+                    "project_root": str(PROJECT_ROOT),
+                    "runs_dir": str(RUNS_DIR),
+                }
+            )
         if request_path == "/api/jobs":
             query = parse_qs(request_url.query)
             limit = _int_query(query, "limit", 40)
