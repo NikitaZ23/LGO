@@ -85,6 +85,8 @@ class JobStore:
             "texture_quality": payload.get("texture_quality", "fast"),
             "rebake_albedo": payload.get("rebake_albedo"),
             "texture": bool(payload.get("texture")),
+            "rebake_texture_ready": job.get("rebake_texture_ready", False),
+            "rebake_texture_missing": job.get("rebake_texture_missing", []),
             "ratings": job.get("ratings", {}),
             "outputs": outputs,
             "primary_output": primary_output,
@@ -95,6 +97,9 @@ class JobStore:
         outputs = self.collect_outputs(job)
         if outputs:
             job["outputs"] = outputs
+        missing = self.missing_rebake_texture_inputs(job)
+        job["rebake_texture_ready"] = not missing
+        job["rebake_texture_missing"] = missing
         return job
 
     def collect_outputs(self, job: dict[str, Any]) -> list[dict[str, Any]]:
@@ -155,6 +160,14 @@ class JobStore:
             "modified_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
             "cache_key": str(stat.st_mtime_ns),
         }
+
+    def missing_rebake_texture_inputs(self, job: dict[str, Any]) -> list[str]:
+        output_dir_text = str(job.get("output_dir") or "")
+        if not output_dir_text:
+            return ["white_mesh.glb", "textured_mesh.obj", "textured_mesh.jpg"]
+        output_dir = Path(output_dir_text)
+        required = ("white_mesh.glb", "textured_mesh.obj", "textured_mesh.jpg")
+        return [filename for filename in required if not (output_dir / filename).exists()]
 
     def display_name(self, job: dict[str, Any]) -> str:
         created_at = str(job.get("created_at", "")).replace("T", " ")

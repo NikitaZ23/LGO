@@ -1171,13 +1171,14 @@ function updateAddTextureButton(job) {
   addTextureButton.disabled = !textureAvailable;
   addTextureButton.textContent = textureActionLabel(job);
 
-  const rebakeAvailable = canRebakeTexture(job);
+  const rebakeBlockReason = rebakeTextureBlockReason(job);
+  const rebakeAvailable = !rebakeBlockReason;
   rebakeTextureJobId = rebakeAvailable ? job.id : null;
   if (rebakeTextureButton) {
     rebakeTextureButton.disabled = !rebakeAvailable;
     rebakeTextureButton.title = rebakeAvailable
       ? "Re-apply the existing texture colors to the white mesh geometry."
-      : "Available after a textured model exists.";
+      : rebakeBlockReason || "Available after a textured model exists.";
   }
 }
 
@@ -1200,13 +1201,32 @@ function hasTexturedMesh(job) {
 }
 
 function canRebakeTexture(job) {
-  if (!job || !job.id || !terminalStatuses.has(job.status)) {
-    return false;
+  return !rebakeTextureBlockReason(job);
+}
+
+function rebakeTextureBlockReason(job) {
+  if (!job || !job.id) {
+    return "Load a finished textured generation first.";
+  }
+  if (!terminalStatuses.has(job.status)) {
+    return "Wait until the current texture operation finishes.";
   }
   if (job.status === "failed" || job.status === "needs_runtime") {
-    return false;
+    return "The current job is not ready for texture re-bake.";
   }
-  return hasWhiteMesh(job) && hasTexturedMesh(job);
+  if (!hasWhiteMesh(job)) {
+    return "white_mesh.glb is required for color re-bake.";
+  }
+  if (!hasTexturedMesh(job)) {
+    return "A textured GLB is required before color re-bake.";
+  }
+  if (job.rebake_texture_ready === false) {
+    const missing = Array.isArray(job.rebake_texture_missing) && job.rebake_texture_missing.length
+      ? ` Missing: ${job.rebake_texture_missing.join(", ")}.`
+      : "";
+    return `Texture source files are required for color re-bake.${missing}`;
+  }
+  return "";
 }
 
 function textureActionLabel(job) {
@@ -1281,7 +1301,7 @@ async function rebakeTextureForCurrentJob() {
         method: "POST",
       },
     );
-    const payload = await response.json();
+    const payload = await readApiPayload(response);
     if (!response.ok) {
       throw new Error(payload.error || response.statusText);
     }
@@ -1292,11 +1312,28 @@ async function rebakeTextureForCurrentJob() {
       pollJob(payload.id);
     }
   } catch (error) {
-    setProgress("failed", "Texture color re-bake could not be started.");
+    const message = errorMessage(error);
+    setProgress("failed", `Texture color re-bake could not be started. ${message}`);
     runBadge.textContent = "Failed";
-    jobStatus.textContent += `\n\nRe-bake color failed: ${error}`;
+    jobStatus.textContent += `\n\nRe-bake color failed: ${message}`;
     updateAddTextureButton(currentJob);
   }
+}
+
+async function readApiPayload(response) {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return { error: text.trim() || errorMessage(error) };
+  }
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function shutdownService() {

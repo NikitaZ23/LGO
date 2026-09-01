@@ -182,6 +182,7 @@ runs/<job-id>/
 Кнопка `Re-run texture` заново запускает тяжелый Hunyuan paint-pass.
 Кнопка `Re-bake color` использует уже сохраненные `textured_mesh.obj` и `textured_mesh.jpg`, быстро пересчитывает цвет на `white_mesh.glb` и применяет текущий цветовой профиль выбранного типа объекта.
 Слайдер `Albedo` управляет финальной силой цвета только для `Re-bake color`: `1.00x` оставляет профиль без ручной поправки, значения выше делают результат ярче, ниже - темнее.
+`Re-bake color` активен только когда у job есть `white_mesh.glb`, `textured_mesh.obj` и `textured_mesh.jpg`.
 
 ## Примечания
 
