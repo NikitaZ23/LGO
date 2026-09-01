@@ -96,12 +96,14 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     if payload.get("texture"):
         texture_config, texture_quality = _apply_texture_quality_preset(config, payload)
         texture_config, _ = _apply_object_type_preset(texture_config, payload)
+        texture_config, texture_color = _apply_texture_color_override(texture_config, payload)
         _update_job(
             job_path,
             "applying_texture",
-            f"Applying PBR texture. Texture speed: {texture_quality['label']}.",
+            f"Applying PBR texture. Texture speed: {texture_quality['label']}. Color: {texture_color:.2f}x.",
             texture_quality=texture_quality,
             object_type=object_type,
+            texture_color=texture_color,
         )
         textured_glb, warning, textured_postprocess = _try_texture(texture_config, output_dir, mesh, images)
         if textured_postprocess:
@@ -138,6 +140,7 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     }
     if texture_quality:
         final_update["texture_quality"] = texture_quality
+        final_update["texture_color"] = payload.get("texture_color")
     _update_job(job_path, status, message, **final_update)
 
 
@@ -147,6 +150,7 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
     payload["texture"] = True
     config, texture_quality = _apply_texture_quality_preset(config, payload)
     config, object_type = _apply_object_type_preset(config, payload)
+    config, texture_color = _apply_texture_color_override(config, payload)
     output_dir = Path(job["output_dir"])
     shape_glb = output_dir / "white_mesh.glb"
     if not shape_glb.exists():
@@ -156,13 +160,14 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
         "payload": payload,
         "texture_quality": texture_quality,
         "object_type": object_type,
+        "texture_color": texture_color,
     }
     if job.get("quality"):
         start_update["quality"] = job["quality"]
     _update_job(
         job_path,
         "applying_texture",
-        f"Applying PBR texture to existing mesh. Texture speed: {texture_quality['label']}.",
+        f"Applying PBR texture to existing mesh. Texture speed: {texture_quality['label']}. Color: {texture_color:.2f}x.",
         **start_update,
     )
 
@@ -194,6 +199,7 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
             "payload": payload,
             "texture_quality": texture_quality,
             "object_type": object_type,
+            "texture_color": texture_color,
         }
         if job.get("quality"):
             converting_update["quality"] = job["quality"]
@@ -213,6 +219,7 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
         "postprocessing": postprocessing,
         "texture_quality": texture_quality,
         "object_type": object_type,
+        "texture_color": texture_color,
         "texture_added": True,
         "texture_elapsed_seconds": elapsed,
     }
@@ -228,6 +235,7 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
     config, texture_quality = _apply_texture_quality_preset(config, payload)
     config, object_type = _apply_object_type_preset(config, payload)
     config, rebake_albedo = _apply_rebake_albedo_override(config, payload)
+    config, texture_color = _apply_texture_color_override(config, payload)
     output_dir = Path(job["output_dir"])
     shape_glb = output_dir / "white_mesh.glb"
     textured_obj = output_dir / "textured_mesh.obj"
@@ -243,13 +251,14 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         "texture_quality": texture_quality,
         "object_type": object_type,
         "rebake_albedo": rebake_albedo,
+        "texture_color": texture_color,
     }
     if job.get("quality"):
         update["quality"] = job["quality"]
     _update_job(
         job_path,
         "rebaking_texture",
-        f"Re-baking existing texture colors. Texture speed: {texture_quality['label']}. Albedo: {rebake_albedo:.2f}x.",
+        f"Re-baking existing texture colors. Texture speed: {texture_quality['label']}. Albedo: {rebake_albedo:.2f}x. Color: {texture_color:.2f}x.",
         **update,
     )
 
@@ -304,6 +313,7 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         "texture_added": True,
         "texture_rebaked": True,
         "rebake_albedo": rebake_albedo,
+        "texture_color": texture_color,
         "texture_rebake_elapsed_seconds": elapsed,
     }
     if job.get("quality"):
@@ -393,12 +403,32 @@ def _apply_rebake_albedo_override(config: dict[str, Any], payload: dict[str, Any
     return effective, albedo_gain
 
 
+def _apply_texture_color_override(config: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
+    texture_color = _texture_color_value(payload.get("texture_color", 1.0))
+    payload["texture_color"] = texture_color
+    effective = copy.deepcopy(config)
+    bake_settings = effective.setdefault("postprocess", {}).setdefault("texture_bake", {})
+    bake_settings["saturation"] = texture_color
+    if texture_color < 1.0:
+        palette_blend = float(bake_settings.get("palette_blend", 0.55))
+        bake_settings["palette_blend"] = round(palette_blend * texture_color, 4)
+    return effective, texture_color
+
+
 def _rebake_albedo_value(value: Any) -> float:
     try:
         parsed = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
         parsed = 1.0
     return round(max(0.5, min(1.8, parsed)), 2)
+
+
+def _texture_color_value(value: Any) -> float:
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        parsed = 1.0
+    return round(max(0.35, min(1.6, parsed)), 2)
 
 
 def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:

@@ -12,6 +12,8 @@ const textureInput = document.querySelector("#texture");
 const textureQualityInput = document.querySelector("#textureQuality");
 const rebakeAlbedoInput = document.querySelector("#rebakeAlbedo");
 const rebakeAlbedoValue = document.querySelector("#rebakeAlbedoValue");
+const textureColorInput = document.querySelector("#textureColor");
+const textureColorValue = document.querySelector("#textureColorValue");
 const singleFields = document.querySelector("#singleFields");
 const multiFields = document.querySelector("#multiFields");
 const jobStatus = document.querySelector("#jobStatus");
@@ -78,6 +80,11 @@ const objectTypeValues = ["organic", "hard_surface", "rock"];
 const rebakeAlbedoRange = {
   min: 0.5,
   max: 1.8,
+  defaultValue: 1,
+};
+const textureColorRange = {
+  min: 0.35,
+  max: 1.6,
   defaultValue: 1,
 };
 const sceneZoom = {
@@ -212,6 +219,38 @@ if (rebakeAlbedoInput) {
   rebakeAlbedoInput.addEventListener("input", () => setRebakeAlbedo(rebakeAlbedoInput.value));
 }
 
+function setTextureColor(value) {
+  const selected = normalizeTextureColor(value);
+  if (textureColorInput) {
+    textureColorInput.value = selected.toFixed(2);
+  }
+  if (textureColorValue) {
+    textureColorValue.textContent = formatTextureColor(selected);
+  }
+  localStorage.setItem("lgo.textureColor", selected.toFixed(2));
+}
+
+function normalizeTextureColor(value) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    return textureColorRange.defaultValue;
+  }
+  const clamped = Math.max(textureColorRange.min, Math.min(textureColorRange.max, parsed));
+  return Math.round(clamped * 100) / 100;
+}
+
+function currentTextureColor() {
+  return normalizeTextureColor(textureColorInput?.value);
+}
+
+function formatTextureColor(value) {
+  return `${normalizeTextureColor(value).toFixed(2)}x`;
+}
+
+if (textureColorInput) {
+  textureColorInput.addEventListener("input", () => setTextureColor(textureColorInput.value));
+}
+
 fileInputs.forEach((input) => {
   input.addEventListener("change", () => {
     void updateImagePreview(input);
@@ -305,6 +344,10 @@ function renderJob(job, options = {}) {
     lines.push(`Object type: ${objectTypeLabel(job.payload.object_type || job.object_type?.selected)}`);
     lines.push(`Texture: ${job.payload.texture ? "PBR texture" : "No texture"}`);
     lines.push(`Texture speed: ${textureQualityLabel(job.payload.texture_quality || job.texture_quality?.selected)}`);
+    if (job.payload.texture_color !== undefined) {
+      lines.push(`Texture color: ${formatTextureColor(job.payload.texture_color)}`);
+      setTextureColor(job.payload.texture_color);
+    }
     if (job.payload.rebake_albedo !== undefined) {
       lines.push(`Re-bake albedo: ${formatAlbedo(job.payload.rebake_albedo)}`);
       setRebakeAlbedo(job.payload.rebake_albedo);
@@ -540,9 +583,10 @@ function historyMeta(job) {
   const objectType = objectTypeLabel(job.object_type);
   const textureQuality = `${textureQualityLabel(job.texture_quality)} tex`;
   const albedo = albedoMeta(job.rebake_albedo);
+  const color = textureColorMeta(job.texture_color);
   const output = job.primary_output ? job.primary_output.label || job.primary_output.filename : "no model";
   const ratings = ratingMeta(job.ratings);
-  return [mode, quality, objectType, texture, textureQuality, albedo, job.status, output, ratings]
+  return [mode, quality, objectType, texture, textureQuality, albedo, color, job.status, output, ratings]
     .filter(Boolean)
     .join(" · ");
 }
@@ -552,6 +596,13 @@ function albedoMeta(value) {
     return "";
   }
   return `albedo ${formatAlbedo(value)}`;
+}
+
+function textureColorMeta(value) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  return `color ${formatTextureColor(value)}`;
 }
 
 function ratingMeta(ratings) {
@@ -1248,12 +1299,13 @@ async function addTextureToCurrentJob() {
   addTextureButton.disabled = true;
   const textureQuality = textureQualityInput.value || "fast";
   const objectType = objectTypeInput.value || "organic";
-  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} texture pass...`);
+  const textureColor = currentTextureColor();
+  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} texture pass, color ${formatTextureColor(textureColor)}...`);
   runBadge.textContent = "queued texture";
 
   try {
     const response = await fetch(
-      `/api/jobs/${encodeURIComponent(textureButtonJobId)}/texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}`,
+      `/api/jobs/${encodeURIComponent(textureButtonJobId)}/texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}&color=${encodeURIComponent(textureColor.toFixed(2))}`,
       {
         method: "POST",
       },
@@ -1291,12 +1343,16 @@ async function rebakeTextureForCurrentJob() {
   const textureQuality = textureQualityInput.value || "fast";
   const objectType = objectTypeInput.value || "organic";
   const albedo = currentRebakeAlbedo();
-  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} color re-bake, albedo ${formatAlbedo(albedo)}...`);
+  const textureColor = currentTextureColor();
+  setProgress(
+    "queued_texture",
+    `Queuing ${textureQualityLabel(textureQuality)} color re-bake, albedo ${formatAlbedo(albedo)}, color ${formatTextureColor(textureColor)}...`,
+  );
   runBadge.textContent = "queued rebake";
 
   try {
     const response = await fetch(
-      `/api/jobs/${encodeURIComponent(rebakeTextureJobId)}/rebake-texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}&albedo=${encodeURIComponent(albedo.toFixed(2))}`,
+      `/api/jobs/${encodeURIComponent(rebakeTextureJobId)}/rebake-texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}&albedo=${encodeURIComponent(albedo.toFixed(2))}&color=${encodeURIComponent(textureColor.toFixed(2))}`,
       {
         method: "POST",
       },
@@ -1506,6 +1562,7 @@ function restoreFormState() {
   }
 
   setRebakeAlbedo(localStorage.getItem("lgo.rebakeAlbedo") || rebakeAlbedoRange.defaultValue);
+  setTextureColor(localStorage.getItem("lgo.textureColor") || textureColorRange.defaultValue);
 }
 
 restoreFormState();

@@ -89,13 +89,19 @@ class LGOHandler(SimpleHTTPRequestHandler):
         if request_path.startswith("/api/jobs/"):
             parts = request_path.strip("/").split("/")
             if len(parts) == 4 and parts[3] == "texture":
-                return self._add_texture(parts[2], _texture_quality_query(query), _object_type_query(query))
+                return self._add_texture(
+                    parts[2],
+                    _texture_quality_query(query),
+                    _object_type_query(query),
+                    _texture_color_query(query),
+                )
             if len(parts) == 4 and parts[3] == "rebake-texture":
                 return self._rebake_texture(
                     parts[2],
                     _texture_quality_query(query),
                     _object_type_query(query),
                     _rebake_albedo_query(query),
+                    _texture_color_query(query),
                 )
             if len(parts) == 4 and parts[3] == "rating":
                 return self._rate_job(parts[2])
@@ -117,6 +123,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
         quality = _quality_field(form)
         object_type = _object_type_field(form)
         texture_quality = _texture_quality_field(form)
+        texture_color = _texture_color_field(form)
         texture = _field(form, "texture", "false") == "true"
         formats = _list_field(form, "formats") or CONFIG["generation"]["default_formats"]
 
@@ -125,6 +132,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
             "quality": quality,
             "object_type": object_type,
             "texture_quality": texture_quality,
+            "texture_color": texture_color,
             "texture": texture,
             "formats": formats,
             "input_files": {},
@@ -154,7 +162,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
 
         return self._json(job, HTTPStatus.CREATED)
 
-    def _add_texture(self, job_id: str, texture_quality: str, object_type: str | None) -> None:
+    def _add_texture(self, job_id: str, texture_quality: str, object_type: str | None, texture_color: float) -> None:
         job = STORE.get(job_id)
         if job is None:
             return self._json({"error": "Job not found."}, HTTPStatus.NOT_FOUND)
@@ -168,6 +176,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
         payload = job.get("payload", {})
         payload["texture"] = True
         payload["texture_quality"] = texture_quality
+        payload["texture_color"] = texture_color
         if object_type:
             payload["object_type"] = object_type
         else:
@@ -203,6 +212,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
         texture_quality: str,
         object_type: str | None,
         rebake_albedo: float,
+        texture_color: float,
     ) -> None:
         job = STORE.get(job_id)
         if job is None:
@@ -228,6 +238,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
         payload["texture"] = True
         payload["texture_quality"] = texture_quality
         payload["rebake_albedo"] = rebake_albedo
+        payload["texture_color"] = texture_color
         if object_type:
             payload["object_type"] = object_type
         else:
@@ -456,6 +467,23 @@ def _texture_quality_field(form: cgi.FieldStorage) -> str:
 def _texture_quality_query(query: dict[str, list[str]]) -> str:
     value = query.get("texture_quality", query.get("texture_speed", [""]))[0]
     return _texture_quality_value(value)
+
+
+def _texture_color_field(form: cgi.FieldStorage) -> float:
+    return _texture_color_value(_field(form, "texture_color", "1.0"))
+
+
+def _texture_color_query(query: dict[str, list[str]]) -> float:
+    value = query.get("color", query.get("texture_color", ["1.0"]))[0]
+    return _texture_color_value(value)
+
+
+def _texture_color_value(value: str) -> float:
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        parsed = 1.0
+    return round(max(0.35, min(1.6, parsed)), 2)
 
 
 def _rebake_albedo_query(query: dict[str, list[str]]) -> float:

@@ -84,6 +84,7 @@ class JobStore:
             "object_type": payload.get("object_type", "organic"),
             "texture_quality": payload.get("texture_quality", "fast"),
             "rebake_albedo": payload.get("rebake_albedo"),
+            "texture_color": payload.get("texture_color"),
             "texture": bool(payload.get("texture")),
             "rebake_texture_ready": job.get("rebake_texture_ready", False),
             "rebake_texture_missing": job.get("rebake_texture_missing", []),
