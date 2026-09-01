@@ -291,6 +291,7 @@
           "contrast": 1.16,
           "brightness": 0.92,
           "gamma": 1.08,
+          "albedo_gain": 1.0,
           "target_luma_mean": 68,
           "min_luma_gain": 0.78,
           "max_luma_gain": 1.18
@@ -427,6 +428,7 @@
       "contrast": 1.05,
       "brightness": 1.0,
       "gamma": 1.0,
+      "albedo_gain": 1.0,
       "target_luma_mean": 0,
       "min_luma_gain": 0.82,
       "max_luma_gain": 1.22,

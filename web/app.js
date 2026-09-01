@@ -10,6 +10,8 @@ const qualityInput = document.querySelector("#quality");
 const objectTypeInput = document.querySelector("#objectType");
 const textureInput = document.querySelector("#texture");
 const textureQualityInput = document.querySelector("#textureQuality");
+const rebakeAlbedoInput = document.querySelector("#rebakeAlbedo");
+const rebakeAlbedoValue = document.querySelector("#rebakeAlbedoValue");
 const singleFields = document.querySelector("#singleFields");
 const multiFields = document.querySelector("#multiFields");
 const jobStatus = document.querySelector("#jobStatus");
@@ -73,6 +75,11 @@ const inputDbName = "lgo-input-cache";
 const inputStoreName = "files";
 let inputDbPromise = null;
 const objectTypeValues = ["organic", "hard_surface", "rock"];
+const rebakeAlbedoRange = {
+  min: 0.5,
+  max: 1.8,
+  defaultValue: 1,
+};
 const sceneZoom = {
   minRadius: 0.05,
   maxRadius: 160,
@@ -173,6 +180,38 @@ textureQualityButtons.forEach((button) => {
   button.addEventListener("click", () => setTextureQuality(button.dataset.textureQuality));
 });
 
+function setRebakeAlbedo(value) {
+  const selected = normalizeRebakeAlbedo(value);
+  if (rebakeAlbedoInput) {
+    rebakeAlbedoInput.value = selected.toFixed(2);
+  }
+  if (rebakeAlbedoValue) {
+    rebakeAlbedoValue.textContent = formatAlbedo(selected);
+  }
+  localStorage.setItem("lgo.rebakeAlbedo", selected.toFixed(2));
+}
+
+function normalizeRebakeAlbedo(value) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    return rebakeAlbedoRange.defaultValue;
+  }
+  const clamped = Math.max(rebakeAlbedoRange.min, Math.min(rebakeAlbedoRange.max, parsed));
+  return Math.round(clamped * 100) / 100;
+}
+
+function currentRebakeAlbedo() {
+  return normalizeRebakeAlbedo(rebakeAlbedoInput?.value);
+}
+
+function formatAlbedo(value) {
+  return `${normalizeRebakeAlbedo(value).toFixed(2)}x`;
+}
+
+if (rebakeAlbedoInput) {
+  rebakeAlbedoInput.addEventListener("input", () => setRebakeAlbedo(rebakeAlbedoInput.value));
+}
+
 fileInputs.forEach((input) => {
   input.addEventListener("change", () => {
     void updateImagePreview(input);
@@ -266,6 +305,10 @@ function renderJob(job, options = {}) {
     lines.push(`Object type: ${objectTypeLabel(job.payload.object_type || job.object_type?.selected)}`);
     lines.push(`Texture: ${job.payload.texture ? "PBR texture" : "No texture"}`);
     lines.push(`Texture speed: ${textureQualityLabel(job.payload.texture_quality || job.texture_quality?.selected)}`);
+    if (job.payload.rebake_albedo !== undefined) {
+      lines.push(`Re-bake albedo: ${formatAlbedo(job.payload.rebake_albedo)}`);
+      setRebakeAlbedo(job.payload.rebake_albedo);
+    }
   }
   if (job.quality) {
     lines.push(`Applied preset: ${job.quality.label || job.quality.selected}`);
@@ -496,11 +539,19 @@ function historyMeta(job) {
   const quality = job.quality || "default";
   const objectType = objectTypeLabel(job.object_type);
   const textureQuality = `${textureQualityLabel(job.texture_quality)} tex`;
+  const albedo = albedoMeta(job.rebake_albedo);
   const output = job.primary_output ? job.primary_output.label || job.primary_output.filename : "no model";
   const ratings = ratingMeta(job.ratings);
-  return [mode, quality, objectType, texture, textureQuality, job.status, output, ratings]
+  return [mode, quality, objectType, texture, textureQuality, albedo, job.status, output, ratings]
     .filter(Boolean)
     .join(" · ");
+}
+
+function albedoMeta(value) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  return `albedo ${formatAlbedo(value)}`;
 }
 
 function ratingMeta(ratings) {
@@ -1219,12 +1270,13 @@ async function rebakeTextureForCurrentJob() {
   }
   const textureQuality = textureQualityInput.value || "fast";
   const objectType = objectTypeInput.value || "organic";
-  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} color re-bake...`);
+  const albedo = currentRebakeAlbedo();
+  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} color re-bake, albedo ${formatAlbedo(albedo)}...`);
   runBadge.textContent = "queued rebake";
 
   try {
     const response = await fetch(
-      `/api/jobs/${encodeURIComponent(rebakeTextureJobId)}/rebake-texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}`,
+      `/api/jobs/${encodeURIComponent(rebakeTextureJobId)}/rebake-texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}&albedo=${encodeURIComponent(albedo.toFixed(2))}`,
       {
         method: "POST",
       },
@@ -1415,6 +1467,8 @@ function restoreFormState() {
   } else {
     setTextureQuality(textureQualityInput.value || "fast");
   }
+
+  setRebakeAlbedo(localStorage.getItem("lgo.rebakeAlbedo") || rebakeAlbedoRange.defaultValue);
 }
 
 restoreFormState();

@@ -366,6 +366,25 @@ button:disabled {
   max-width: 360px;
 }
 
+.range-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 62px;
+  align-items: center;
+  gap: 12px;
+  max-width: 360px;
+}
+
+.range-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.range-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .hidden {
   display: none;
 }

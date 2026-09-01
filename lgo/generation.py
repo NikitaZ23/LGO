@@ -28,6 +28,7 @@ class GenerationService:
                 "texture_quality",
                 self.config.get("generation", {}).get("default_texture_quality", "fast"),
             ),
+            "rebake_albedo": job["payload"].get("rebake_albedo"),
             "texture": job["payload"]["texture"],
             "formats": job["payload"]["formats"],
             "input_files": job["payload"]["input_files"],

@@ -227,6 +227,7 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
     payload["texture"] = True
     config, texture_quality = _apply_texture_quality_preset(config, payload)
     config, object_type = _apply_object_type_preset(config, payload)
+    config, rebake_albedo = _apply_rebake_albedo_override(config, payload)
     output_dir = Path(job["output_dir"])
     shape_glb = output_dir / "white_mesh.glb"
     textured_obj = output_dir / "textured_mesh.obj"
@@ -241,13 +242,14 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         "payload": payload,
         "texture_quality": texture_quality,
         "object_type": object_type,
+        "rebake_albedo": rebake_albedo,
     }
     if job.get("quality"):
         update["quality"] = job["quality"]
     _update_job(
         job_path,
         "rebaking_texture",
-        f"Re-baking existing texture colors. Texture speed: {texture_quality['label']}.",
+        f"Re-baking existing texture colors. Texture speed: {texture_quality['label']}. Albedo: {rebake_albedo:.2f}x.",
         **update,
     )
 
@@ -300,6 +302,7 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         "object_type": object_type,
         "texture_added": True,
         "texture_rebaked": True,
+        "rebake_albedo": rebake_albedo,
         "texture_rebake_elapsed_seconds": elapsed,
     }
     if job.get("quality"):
@@ -378,6 +381,23 @@ def _apply_object_type_preset(config: dict[str, Any], payload: dict[str, Any]) -
         "preprocess": preset.get("preprocess", {}),
         "postprocess": preset.get("postprocess", {}),
     }
+
+
+def _apply_rebake_albedo_override(config: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
+    albedo_gain = _rebake_albedo_value(payload.get("rebake_albedo", 1.0))
+    payload["rebake_albedo"] = albedo_gain
+    effective = copy.deepcopy(config)
+    bake_settings = effective.setdefault("postprocess", {}).setdefault("texture_bake", {})
+    bake_settings["albedo_gain"] = albedo_gain
+    return effective, albedo_gain
+
+
+def _rebake_albedo_value(value: Any) -> float:
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        parsed = 1.0
+    return round(max(0.5, min(1.8, parsed)), 2)
 
 
 def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -1856,6 +1876,12 @@ def _adjust_baked_vertex_colors(colors, config: dict[str, Any], reference_image:
                 adjusted *= gain
                 report["applied"] = True
             report["luma_gain"] = round(gain, 4)
+
+    albedo_gain = _rebake_albedo_value(settings.get("albedo_gain", 1.0))
+    if abs(albedo_gain - 1.0) > 0.001:
+        adjusted *= albedo_gain
+        report["applied"] = True
+    report["albedo_gain"] = albedo_gain
 
     adjusted = np.clip(adjusted, 0, 255).astype(np.float32)
     report["stats_after"] = _color_array_stats(adjusted)
