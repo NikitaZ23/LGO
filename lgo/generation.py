@@ -23,7 +23,7 @@ class GenerationService:
             "quality": job["payload"].get("quality", self.config.get("generation", {}).get("default_quality", "balanced")),
             "object_type": job["payload"].get(
                 "object_type",
-                self.config.get("generation", {}).get("default_object_type", "organic"),
+                self.config.get("generation", {}).get("default_object_type", "character"),
             ),
             "texture_quality": job["payload"].get(
                 "texture_quality",

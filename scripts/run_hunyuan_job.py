@@ -421,10 +421,10 @@ def _apply_texture_quality_preset(config: dict[str, Any], payload: dict[str, Any
 
 def _apply_object_type_preset(config: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     presets = config.get("object_type_presets", {})
-    default_type = str(config.get("generation", {}).get("default_object_type", "organic")).lower()
-    selected = str(payload.get("object_type") or default_type).lower()
+    default_type = _object_type_alias(config.get("generation", {}).get("default_object_type", "character"))
+    selected = _object_type_alias(payload.get("object_type") or default_type)
     if selected not in presets:
-        selected = default_type if default_type in presets else "organic"
+        selected = default_type if default_type in presets else "character"
     if selected not in presets and presets:
         selected = next(iter(presets))
 
@@ -442,6 +442,18 @@ def _apply_object_type_preset(config: dict[str, Any], payload: dict[str, Any]) -
         "preprocess": preset.get("preprocess", {}),
         "postprocess": preset.get("postprocess", {}),
     }
+
+
+def _object_type_alias(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "organic": "character",
+        "human": "character",
+        "rock_stone": "rock",
+        "rock / stone": "rock",
+        "hard surface": "hard_surface",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _apply_rebake_albedo_override(config: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:

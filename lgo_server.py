@@ -432,23 +432,37 @@ def _quality_field(form: cgi.FieldStorage) -> str:
 
 
 def _default_object_type() -> str:
-    default_type = str(CONFIG.get("generation", {}).get("default_object_type", "organic")).lower()
+    default_type = _object_type_alias(CONFIG.get("generation", {}).get("default_object_type", "character"))
     presets = CONFIG.get("object_type_presets", {})
     if default_type in presets:
         return default_type
+    if "character" in presets:
+        return "character"
     if "organic" in presets:
         return "organic"
     if presets:
         return next(iter(presets))
-    return "organic"
+    return "character"
 
 
 def _object_type_value(value: str) -> str:
-    object_type = str(value or _default_object_type()).lower()
+    object_type = _object_type_alias(value or _default_object_type())
     presets = CONFIG.get("object_type_presets", {})
     if object_type in presets:
         return object_type
     return _default_object_type()
+
+
+def _object_type_alias(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "organic": "character",
+        "human": "character",
+        "rock_stone": "rock",
+        "rock / stone": "rock",
+        "hard surface": "hard_surface",
+    }
+    return aliases.get(normalized, normalized)
 
 
 def _object_type_field(form: cgi.FieldStorage) -> str:

@@ -77,7 +77,10 @@ const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
 const inputStoreName = "files";
 let inputDbPromise = null;
-const objectTypeValues = ["organic", "hard_surface", "rock"];
+const objectTypeValues = ["character", "rock", "hard_surface", "cloth", "creature"];
+const objectTypeAliases = {
+  organic: "character",
+};
 const rebakeAlbedoRange = {
   min: 0.5,
   max: 1.8,
@@ -151,7 +154,7 @@ qualityButtons.forEach((button) => {
 });
 
 function setObjectType(objectType) {
-  const selected = objectTypeValues.includes(objectType) ? objectType : "organic";
+  const selected = normalizeObjectType(objectType);
   objectTypeInput.value = selected;
   localStorage.setItem("lgo.objectType", selected);
   objectTypeButtons.forEach((button) => {
@@ -1440,7 +1443,7 @@ async function addTextureToCurrentJob() {
 
   addTextureButton.disabled = true;
   const textureQuality = textureQualityInput.value || "fast";
-  const objectType = objectTypeInput.value || "organic";
+  const objectType = objectTypeInput.value || "character";
   const textureColor = currentTextureColor();
   setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} texture pass, color ${formatTextureColor(textureColor)}...`);
   runBadge.textContent = "queued texture";
@@ -1484,7 +1487,7 @@ async function rebakeTextureForCurrentJob() {
     rebakeTextureButton.disabled = true;
   }
   const textureQuality = textureQualityInput.value || "fast";
-  const objectType = objectTypeInput.value || "organic";
+  const objectType = objectTypeInput.value || "character";
   const albedo = currentRebakeAlbedo();
   const textureColor = currentTextureColor();
   setProgress(
@@ -1664,11 +1667,20 @@ function textureQualityLabel(value) {
 function objectTypeLabel(value) {
   const selected = typeof value === "string" ? value : value?.selected;
   const labels = {
-    organic: "Organic",
-    hard_surface: "Hard surface",
+    character: "Character",
+    organic: "Character",
     rock: "Rock / stone",
+    hard_surface: "Hard surface",
+    cloth: "Cloth",
+    creature: "Creature",
   };
-  return labels[selected] || labels.organic;
+  return labels[selected] || labels.character;
+}
+
+function normalizeObjectType(value) {
+  const raw = String(value || "character").toLowerCase();
+  const selected = objectTypeAliases[raw] || raw;
+  return objectTypeValues.includes(selected) ? selected : "character";
 }
 
 function restoreLastJob() {
@@ -1697,10 +1709,10 @@ function restoreFormState() {
   }
 
   const storedObjectType = localStorage.getItem("lgo.objectType");
-  if (objectTypeValues.includes(storedObjectType)) {
+  if (storedObjectType) {
     setObjectType(storedObjectType);
   } else {
-    setObjectType(objectTypeInput.value || "organic");
+    setObjectType(objectTypeInput.value || "character");
   }
 
   const storedTexture = localStorage.getItem("lgo.texture");
