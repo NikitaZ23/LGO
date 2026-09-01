@@ -262,6 +262,7 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         textured_glb,
         config,
         _primary_image(images),
+        shade_smooth=False,
     )
 
     warnings = [
@@ -1502,6 +1503,7 @@ def _bake_texture_to_shape_mesh(
     target_glb: Path,
     config: dict[str, Any],
     reference_image: Image.Image | None = None,
+    shade_smooth: bool = True,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "enabled": True,
@@ -1592,7 +1594,14 @@ def _bake_texture_to_shape_mesh(
                 "color": color_report,
             }
         )
-        report["shade_smooth"] = _shade_smooth_glb(config, target_glb)
+        if shade_smooth:
+            report["shade_smooth"] = _shade_smooth_glb(config, target_glb)
+        else:
+            report["shade_smooth"] = {
+                "enabled": False,
+                "applied": False,
+                "reason": "skipped for texture color re-bake",
+            }
         report["glb_material"] = _stabilize_glb_pbr_materials(target_glb, config)
     except Exception as exc:  # noqa: BLE001 - fall back to Hunyuan's remeshed texture output.
         traceback.print_exc()

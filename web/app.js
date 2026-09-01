@@ -645,8 +645,8 @@ function renderViewerChoices(job, choices) {
 
 function collectSceneOutputs(job) {
   const glbOutputs = (job?.outputs || []).filter((output) => output.format === "glb");
-  const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
-    || glbOutputs.find((output) => output.filename === "textured_mesh.glb")
+  const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh.glb")
+    || glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
     || null;
   const whiteGlb = glbOutputs.find((output) => output.filename === "white_mesh.glb") || null;
   const fallbackGlb = glbOutputs.find((output) => output !== whiteGlb && output !== texturedGlb) || null;
@@ -830,8 +830,8 @@ function ratingOutputs(job) {
   const glbOutputs = (job?.outputs || []).filter((output) => output.format === "glb");
   return {
     white: glbOutputs.find((output) => output.filename === "white_mesh.glb"),
-    texture: glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
-      || glbOutputs.find((output) => output.filename === "textured_mesh.glb"),
+    texture: glbOutputs.find((output) => output.filename === "textured_mesh.glb")
+      || glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb"),
   };
 }
 

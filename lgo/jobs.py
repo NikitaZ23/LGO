@@ -8,7 +8,7 @@ from typing import Any
 
 
 PUBLIC_OUTPUT_FORMATS = {"glb", "fbx", "obj", "ply", "stl"}
-PREFERRED_GLB_OUTPUTS = ("textured_mesh_stable.glb", "textured_mesh.glb", "white_mesh.glb")
+PREFERRED_GLB_OUTPUTS = ("textured_mesh.glb", "textured_mesh_stable.glb", "white_mesh.glb")
 
 
 class JobStore:
