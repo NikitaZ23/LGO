@@ -11,6 +11,7 @@ import sys
 import time
 import traceback
 import types
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,19 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     if requested_extra_formats:
         _update_job(job_path, "converting_outputs", "Converting output formats.")
     outputs.extend(_convert_extra_formats(config, primary_glb, payload.get("formats", []), output_dir))
+
+    texture_versions = None
+    if payload.get("texture") and textured_glb is not None:
+        texture_version = _snapshot_texture_version(
+            job_path,
+            output_dir,
+            "created",
+            payload,
+            texture_quality,
+            object_type,
+        )
+        if texture_version:
+            texture_versions = _append_texture_version(job_path, texture_version)
     elapsed = round(time.time() - started_at, 2)
 
     status = "completed_with_warnings" if warnings else "completed"
@@ -141,6 +155,8 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     if texture_quality:
         final_update["texture_quality"] = texture_quality
         final_update["texture_color"] = payload.get("texture_color")
+    if texture_versions is not None:
+        final_update["texture_versions"] = texture_versions
     _update_job(job_path, status, message, **final_update)
 
 
@@ -206,6 +222,23 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
         _update_job(job_path, "converting_outputs", "Converting output formats.", **converting_update)
     outputs.extend(_convert_extra_formats(config, primary_glb, payload.get("formats", []), output_dir))
 
+    texture_versions = None
+    if textured_glb is not None:
+        existing_texture = bool(job.get("texture_versions")) or any(
+            str(output.get("filename", "")).startswith("textured_mesh")
+            for output in job.get("outputs", [])
+        )
+        texture_version = _snapshot_texture_version(
+            job_path,
+            output_dir,
+            "reworked" if existing_texture else "created",
+            payload,
+            texture_quality,
+            object_type,
+        )
+        if texture_version:
+            texture_versions = _append_texture_version(job_path, texture_version)
+
     elapsed = round(time.time() - started_at, 2)
     status = "completed_with_warnings" if warnings else "completed"
     message = f"Texture pass completed in {elapsed}s." if textured_glb else f"Texture pass finished in {elapsed}s."
@@ -223,6 +256,8 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
         "texture_added": True,
         "texture_elapsed_seconds": elapsed,
     }
+    if texture_versions is not None:
+        final_update["texture_versions"] = texture_versions
     if job.get("quality"):
         final_update["quality"] = job["quality"]
     _update_job(job_path, status, message, **final_update)
@@ -297,6 +332,19 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         if output.get("filename") not in {"white_mesh.glb", "textured_mesh.glb"}
     )
 
+    texture_versions = None
+    if textured_postprocess.get("applied") and textured_glb.exists():
+        texture_version = _snapshot_texture_version(
+            job_path,
+            output_dir,
+            "color_rebake",
+            payload,
+            texture_quality,
+            object_type,
+        )
+        if texture_version:
+            texture_versions = _append_texture_version(job_path, texture_version)
+
     elapsed = round(time.time() - started_at, 2)
     status = "completed_with_warnings" if warnings else "completed"
     message = f"Texture color re-bake completed in {elapsed}s."
@@ -316,6 +364,8 @@ def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, A
         "texture_color": texture_color,
         "texture_rebake_elapsed_seconds": elapsed,
     }
+    if texture_versions is not None:
+        final_update["texture_versions"] = texture_versions
     if job.get("quality"):
         final_update["quality"] = job["quality"]
     _update_job(job_path, status, message, **final_update)
@@ -2492,6 +2542,101 @@ def _primary_image(images):
     return images
 
 
+TEXTURE_SNAPSHOT_FILENAMES = (
+    "textured_mesh.glb",
+    "textured_mesh_stable.glb",
+    "textured_mesh.fbx",
+    "textured_mesh.obj",
+    "textured_mesh_export.obj",
+    "textured_mesh.mtl",
+    "textured_mesh.jpg",
+    "textured_mesh_metallic.jpg",
+    "textured_mesh_roughness.jpg",
+)
+
+
+def _snapshot_texture_version(
+    job_path: Path,
+    output_dir: Path,
+    kind: str,
+    payload: dict[str, Any],
+    texture_quality: dict[str, Any] | None,
+    object_type: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    version_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{kind.replace('_', '-')}-{uuid.uuid4().hex[:6]}"
+    target_dir = output_dir / "textures" / version_id
+    outputs: list[dict[str, str]] = []
+
+    for filename in TEXTURE_SNAPSHOT_FILENAMES:
+        source = output_dir / filename
+        if not source.exists() or not source.is_file():
+            continue
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / source.name
+        shutil.copy2(source, target)
+        fmt = target.suffix.lstrip(".").lower()
+        outputs.append(
+            {
+                "format": fmt,
+                "filename": target.relative_to(output_dir).as_posix(),
+                "path": str(target),
+                "label": _output_label(target, fmt),
+            }
+        )
+
+    primary_output = next(
+        (
+            output for output in outputs
+            if output["format"] == "glb" and Path(output["filename"]).name == "textured_mesh.glb"
+        ),
+        None,
+    )
+    if primary_output is None:
+        primary_output = next((output for output in outputs if output["format"] == "glb"), None)
+    if primary_output is None:
+        return None
+
+    return {
+        "id": version_id,
+        "kind": kind,
+        "label": _texture_version_label(kind, created_at),
+        "created_at": created_at,
+        "texture_quality": _preset_selected(texture_quality) or payload.get("texture_quality"),
+        "object_type": _preset_selected(object_type) or payload.get("object_type"),
+        "rebake_albedo": payload.get("rebake_albedo"),
+        "texture_color": payload.get("texture_color"),
+        "outputs": outputs,
+        "primary_output": primary_output,
+    }
+
+
+def _append_texture_version(job_path: Path, version: dict[str, Any]) -> list[dict[str, Any]]:
+    job = _read_json(job_path)
+    versions = [
+        item for item in job.get("texture_versions", []) or []
+        if isinstance(item, dict) and item.get("id") != version.get("id")
+    ]
+    versions.append(version)
+    return versions[-80:]
+
+
+def _texture_version_label(kind: str, created_at: str) -> str:
+    labels = {
+        "created": "Created texture",
+        "reworked": "Reworked texture",
+        "color_rebake": "Color re-bake",
+    }
+    return f"{labels.get(kind, 'Texture')} {created_at.replace('T', ' ')}"
+
+
+def _preset_selected(preset: dict[str, Any] | None) -> str | None:
+    if not isinstance(preset, dict):
+        return None
+    selected = preset.get("selected")
+    return str(selected) if selected else None
+
+
 def _convert_extra_formats(
     config: dict[str, Any],
     primary_glb: Path,
@@ -2613,6 +2758,11 @@ def _output_label(path: Path, fmt: str) -> str:
         "textured_mesh.glb": "Textured mesh GLB",
         "textured_mesh.fbx": "Textured mesh FBX",
         "textured_mesh.obj": "Textured mesh OBJ",
+        "textured_mesh_export.obj": "Textured mesh OBJ export",
+        "textured_mesh.mtl": "Textured material MTL",
+        "textured_mesh.jpg": "Textured albedo JPG",
+        "textured_mesh_metallic.jpg": "Textured metallic JPG",
+        "textured_mesh_roughness.jpg": "Textured roughness JPG",
         "white_mesh.glb": "White mesh GLB",
         "white_mesh.fbx": "White mesh FBX",
         "white_mesh.obj": "White mesh OBJ",

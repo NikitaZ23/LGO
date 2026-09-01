@@ -24,6 +24,21 @@ RUNS_DIR = Path(CONFIG["service"]["runs_dir"])
 STORE = JobStore(RUNS_DIR)
 GENERATOR = GenerationService(CONFIG)
 WEB_ROOT = PROJECT_ROOT / "web"
+ACTIVE_JOB_STATUSES = {
+    "created",
+    "prepared",
+    "queued",
+    "running",
+    "preprocessing_images",
+    "loading_shape_model",
+    "generating_shape",
+    "postprocessing_mesh",
+    "queued_texture",
+    "running_texture",
+    "applying_texture",
+    "rebaking_texture",
+    "converting_outputs",
+}
 
 
 class LGOHandler(SimpleHTTPRequestHandler):
@@ -74,7 +89,14 @@ class LGOHandler(SimpleHTTPRequestHandler):
         request_path = request_url.path
         query = parse_qs(request_url.query)
         if request_path == "/api/shutdown":
-            self._json({"ok": True, "message": "LGO shutdown command sent."})
+            stopped = _stop_service_work("Stopped by service shutdown.")
+            count = len(stopped)
+            message = (
+                f"LGO shutdown command sent. Stopped {count} active job(s)."
+                if count
+                else "LGO shutdown command sent. No active jobs were running."
+            )
+            self._json({"ok": True, "message": message, "stopped_jobs": stopped})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         if request_path == "/api/restart":
@@ -337,9 +359,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
         self.wfile.write(content)
 
     def _serve_job_output(self, job: dict[str, Any], filename: str) -> None:
-        output_dir = Path(job["output_dir"]).resolve()
-        path = (output_dir / Path(filename).name).resolve()
-        if output_dir not in path.parents and path != output_dir:
+        path = _safe_job_output_path(job, filename)
+        if path is None:
             return self._json({"error": "Invalid output path."}, HTTPStatus.BAD_REQUEST)
         return self._serve_file(path, cache_control="no-store, max-age=0")
 
@@ -496,13 +517,23 @@ def _rebake_albedo_query(query: dict[str, list[str]]) -> float:
 
 
 def _has_rating_target(job: dict[str, Any], target: str) -> bool:
-    outputs = job.get("outputs", [])
+    outputs = list(job.get("outputs", []))
+    for version in job.get("texture_versions", []) or []:
+        if isinstance(version, dict):
+            outputs.extend(version.get("outputs", []) or [])
     if target == "white":
-        return any(output.get("format") == "glb" and output.get("filename") == "white_mesh.glb" for output in outputs)
+        return any(
+            output.get("format") == "glb" and _output_basename(output.get("filename")) == "white_mesh.glb"
+            for output in outputs
+        )
     return any(
-        output.get("format") == "glb" and str(output.get("filename", "")).startswith("textured_mesh")
+        output.get("format") == "glb" and _output_basename(output.get("filename")).startswith("textured_mesh")
         for output in outputs
     )
+
+
+def _output_basename(filename: Any) -> str:
+    return Path(str(filename or "").replace("\\", "/")).name
 
 
 def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
@@ -511,6 +542,43 @@ def _int_query(query: dict[str, list[str]], name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(100, value))
+
+
+def _safe_job_output_path(job: dict[str, Any], filename: str) -> Path | None:
+    output_dir = Path(job["output_dir"]).resolve()
+    relative = Path(str(filename).replace("\\", "/"))
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        return None
+    path = (output_dir / relative).resolve()
+    if path != output_dir and output_dir not in path.parents:
+        return None
+    return path
+
+
+def _stop_service_work(message: str) -> list[dict[str, Any]]:
+    stopped: list[dict[str, Any]] = []
+    for job in STORE.iter_jobs():
+        status = str(job.get("status") or "")
+        if status not in ACTIVE_JOB_STATUSES:
+            continue
+        process_id = job.get("process_id")
+        stop_report = GENERATOR.stop_process_tree(process_id)
+        stopped.append(
+            {
+                "job_id": job.get("id", ""),
+                "status": status,
+                "process_id": process_id,
+                **stop_report,
+            }
+        )
+        STORE.update(
+            job,
+            "failed",
+            message,
+            stopped_by_shutdown=True,
+            stop_report=stop_report,
+        )
+    return stopped
 
 
 def _server_host(server) -> str:

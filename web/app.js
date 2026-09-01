@@ -71,6 +71,7 @@ let historyLoaded = false;
 let historyFilter = localStorage.getItem("lgo.historyFilter") || "all";
 let currentSceneFilename = "";
 let currentSceneOutputs = null;
+let currentTextureVersionId = "";
 const previewUrls = new Map();
 const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
@@ -309,6 +310,7 @@ form.addEventListener("submit", async (event) => {
       throw new Error(payload.error || response.statusText);
     }
     localStorage.setItem("lgo.lastJobId", payload.id);
+    localStorage.removeItem("lgo.lastTextureVersionId");
     renderJob(payload);
     void loadHistory();
     if (payload.id && !terminalStatuses.has(payload.status)) {
@@ -330,6 +332,7 @@ form.addEventListener("submit", async (event) => {
 function renderJob(job, options = {}) {
   currentJobId = job.id || currentJobId;
   currentJob = job;
+  currentTextureVersionId = options.textureVersionId || "";
   setProgress(job.status, job.message || job.status);
   runBadge.textContent = readableStatus(job.status);
 
@@ -362,6 +365,9 @@ function renderJob(job, options = {}) {
   if (job.texture_quality) {
     lines.push(`Applied texture preset: ${job.texture_quality.label || job.texture_quality.selected}`);
   }
+  if (job.selected_texture_version) {
+    lines.push(`Selected texture: ${job.selected_texture_version.label || textureVersionTitle(job.selected_texture_version)}`);
+  }
 
   if (job.process_id) {
     lines.push(`Process: ${job.process_id}`);
@@ -382,7 +388,7 @@ function renderJob(job, options = {}) {
   jobStatus.textContent = lines.join("\n");
   renderOutputs(job, options);
   updateAddTextureButton(job);
-  highlightHistoryJob(job.id);
+  highlightHistoryJob(job.id, currentTextureVersionId);
   loadJobLog(job, lines.join("\n"));
 }
 
@@ -496,7 +502,7 @@ async function loadHistory() {
 }
 
 function setHistoryFilter(filter) {
-  historyFilter = ["all", "models", "no-model"].includes(filter) ? filter : "all";
+  historyFilter = ["all", "models", "textures", "no-model"].includes(filter) ? filter : "all";
   localStorage.setItem("lgo.historyFilter", historyFilter);
   historyFilterButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.historyFilter === historyFilter);
@@ -506,47 +512,85 @@ function setHistoryFilter(filter) {
   }
 }
 
-function filteredHistoryJobs(jobs) {
+function filteredHistoryItems(jobs) {
+  if (historyFilter === "textures") {
+    return textureHistoryItems(jobs);
+  }
   if (historyFilter === "models") {
-    return jobs.filter((job) => job.has_model);
+    return jobs.filter((job) => job.has_model).map((job) => ({ type: "job", job }));
   }
   if (historyFilter === "no-model") {
-    return jobs.filter((job) => !job.has_model);
+    return jobs.filter((job) => !job.has_model).map((job) => ({ type: "job", job }));
   }
-  return jobs;
+  return jobs.map((job) => ({ type: "job", job }));
+}
+
+function textureHistoryItems(jobs) {
+  return jobs
+    .flatMap((job) => (job.texture_versions || []).map((version) => ({ type: "texture", job, version })))
+    .sort((left, right) => String(right.version.created_at || "").localeCompare(String(left.version.created_at || "")));
 }
 
 function renderHistory(jobs) {
-  const visibleJobs = filteredHistoryJobs(jobs);
-  if (!visibleJobs.length) {
+  const visibleItems = filteredHistoryItems(jobs);
+  if (!visibleItems.length) {
     historyList.textContent = jobs.length ? "No items for this filter." : "No generations yet.";
     return;
   }
 
   const fragment = document.createDocumentFragment();
-  visibleJobs.forEach((job) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `history-item${job.id === currentJobId ? " active" : ""}${job.has_model ? "" : " no-model"}`;
-    item.dataset.jobId = job.id;
-    item.addEventListener("click", () => loadHistoryJob(job.id));
-
-    const text = document.createElement("span");
-    const title = document.createElement("span");
-    title.className = "history-main";
-    title.textContent = job.display_name || job.id;
-    const meta = document.createElement("span");
-    meta.className = "history-meta";
-    meta.textContent = historyMeta(job);
-    text.append(title, meta);
-
-    const action = document.createElement("span");
-    action.className = "history-load";
-    action.textContent = job.has_model ? "Load" : "Open";
-    item.append(text, action);
-    fragment.appendChild(item);
+  visibleItems.forEach((entry) => {
+    fragment.appendChild(entry.type === "texture" ? textureHistoryElement(entry) : jobHistoryElement(entry.job));
   });
   historyList.replaceChildren(fragment);
+}
+
+function jobHistoryElement(job) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `history-item${job.id === currentJobId && !currentTextureVersionId ? " active" : ""}${job.has_model ? "" : " no-model"}`;
+  item.dataset.jobId = job.id;
+  item.addEventListener("click", () => loadHistoryJob(job.id));
+
+  const text = document.createElement("span");
+  const title = document.createElement("span");
+  title.className = "history-main";
+  title.textContent = job.display_name || job.id;
+  const meta = document.createElement("span");
+  meta.className = "history-meta";
+  meta.textContent = historyMeta(job);
+  text.append(title, meta);
+
+  const action = document.createElement("span");
+  action.className = "history-load";
+  action.textContent = job.has_model ? "Load" : "Open";
+  item.append(text, action);
+  return item;
+}
+
+function textureHistoryElement(entry) {
+  const { job, version } = entry;
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `history-item texture-version${job.id === currentJobId && version.id === currentTextureVersionId ? " active" : ""}`;
+  item.dataset.jobId = job.id;
+  item.dataset.textureVersionId = version.id;
+  item.addEventListener("click", () => loadHistoryTexture(job.id, version.id));
+
+  const text = document.createElement("span");
+  const title = document.createElement("span");
+  title.className = "history-main";
+  title.textContent = version.label || textureVersionTitle(version);
+  const meta = document.createElement("span");
+  meta.className = "history-meta";
+  meta.textContent = textureHistoryMeta(job, version);
+  text.append(title, meta);
+
+  const action = document.createElement("span");
+  action.className = "history-load";
+  action.textContent = "Load";
+  item.append(text, action);
+  return item;
 }
 
 async function loadHistoryJob(jobId) {
@@ -566,6 +610,8 @@ async function loadHistoryJob(jobId) {
       throw new Error(job.error || response.statusText);
     }
     localStorage.setItem("lgo.lastJobId", job.id);
+    localStorage.removeItem("lgo.lastTextureVersionId");
+    currentTextureVersionId = "";
     renderJob(job, { preferredScene: "white" });
     if (!terminalStatuses.has(job.status)) {
       pollJob(job.id);
@@ -574,6 +620,60 @@ async function loadHistoryJob(jobId) {
     runBadge.textContent = "Failed";
     jobStatus.textContent = `Could not load history item ${jobId}.\n\n${error}`;
   }
+}
+
+async function loadHistoryTexture(jobId, versionId) {
+  if (!jobId || !versionId) {
+    return;
+  }
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  runBadge.textContent = "Loading";
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const job = await response.json();
+    if (!response.ok) {
+      throw new Error(job.error || response.statusText);
+    }
+    const version = (job.texture_versions || []).find((item) => item.id === versionId);
+    if (!version) {
+      throw new Error("Texture version was not found.");
+    }
+    const textureJob = jobWithTextureVersion(job, version);
+    localStorage.setItem("lgo.lastJobId", job.id);
+    localStorage.setItem("lgo.lastTextureVersionId", version.id);
+    renderJob(textureJob, { preferredScene: "texture", textureVersionId: version.id });
+  } catch (error) {
+    runBadge.textContent = "Failed";
+    jobStatus.textContent = `Could not load texture version ${versionId}.\n\n${error}`;
+  }
+}
+
+function jobWithTextureVersion(job, version) {
+  const clone = JSON.parse(JSON.stringify(job));
+  const whiteOutput = (job.outputs || []).find((output) => output.format === "glb" && outputBasename(output) === "white_mesh.glb");
+  clone.outputs = uniqueOutputs([
+    whiteOutput,
+    ...(version.outputs || []),
+  ].filter(Boolean));
+  clone.primary_output = version.primary_output || clone.outputs.find((output) => output.format === "glb") || null;
+  clone.selected_texture_version = version;
+  clone.payload = {
+    ...(clone.payload || {}),
+    texture: true,
+    texture_quality: version.texture_quality || clone.payload?.texture_quality,
+    object_type: version.object_type || clone.payload?.object_type,
+    rebake_albedo: version.rebake_albedo ?? clone.payload?.rebake_albedo,
+    texture_color: version.texture_color ?? clone.payload?.texture_color,
+  };
+  clone.texture_quality = version.texture_quality || clone.texture_quality;
+  clone.object_type = version.object_type || clone.object_type;
+  clone.rebake_albedo = version.rebake_albedo ?? clone.rebake_albedo;
+  clone.texture_color = version.texture_color ?? clone.texture_color;
+  return clone;
 }
 
 function historyMeta(job) {
@@ -605,6 +705,33 @@ function textureColorMeta(value) {
   return `color ${formatTextureColor(value)}`;
 }
 
+function textureVersionTitle(version) {
+  const timestamp = String(version.created_at || "").replace("T", " ");
+  return `${textureKindLabel(version.kind)} ${timestamp}`.trim();
+}
+
+function textureKindLabel(kind) {
+  const labels = {
+    created: "Created texture",
+    reworked: "Reworked texture",
+    color_rebake: "Color re-bake",
+    current: "Current texture",
+  };
+  return labels[kind] || "Texture";
+}
+
+function textureHistoryMeta(job, version) {
+  const source = job.display_name || job.id;
+  const objectType = objectTypeLabel(version.object_type || job.object_type);
+  const textureQuality = `${textureQualityLabel(version.texture_quality || job.texture_quality)} tex`;
+  const albedo = albedoMeta(version.rebake_albedo);
+  const color = textureColorMeta(version.texture_color);
+  const output = version.primary_output?.label || version.primary_output?.filename || "texture";
+  return [source, objectType, textureQuality, albedo, color, output]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function ratingMeta(ratings) {
   const parts = [];
   const whiteRating = ratingValue({ ratings }, "white");
@@ -618,12 +745,14 @@ function ratingMeta(ratings) {
   return parts.join(" · ");
 }
 
-function highlightHistoryJob(jobId) {
+function highlightHistoryJob(jobId, textureVersionId = currentTextureVersionId) {
   if (!historyList) {
     return;
   }
   historyList.querySelectorAll(".history-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.jobId === jobId);
+    const isJob = item.dataset.jobId === jobId && !item.dataset.textureVersionId && !textureVersionId;
+    const isTexture = item.dataset.jobId === jobId && item.dataset.textureVersionId === textureVersionId;
+    item.classList.toggle("active", isJob || isTexture);
   });
 }
 
@@ -696,10 +825,10 @@ function renderViewerChoices(job, choices) {
 
 function collectSceneOutputs(job) {
   const glbOutputs = (job?.outputs || []).filter((output) => output.format === "glb");
-  const texturedGlb = glbOutputs.find((output) => output.filename === "textured_mesh.glb")
-    || glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb")
+  const texturedGlb = glbOutputs.find((output) => outputBasename(output) === "textured_mesh.glb")
+    || glbOutputs.find((output) => outputBasename(output) === "textured_mesh_stable.glb")
     || null;
-  const whiteGlb = glbOutputs.find((output) => output.filename === "white_mesh.glb") || null;
+  const whiteGlb = glbOutputs.find((output) => outputBasename(output) === "white_mesh.glb") || null;
   const fallbackGlb = glbOutputs.find((output) => output !== whiteGlb && output !== texturedGlb) || null;
   return { glbOutputs, whiteGlb, texturedGlb, fallbackGlb };
 }
@@ -760,10 +889,11 @@ function toggleResultTexture(showTexture) {
 }
 
 function sceneChoiceLabel(output) {
-  if (output.filename === "white_mesh.glb") {
+  const filename = outputBasename(output);
+  if (filename === "white_mesh.glb") {
     return "White mesh";
   }
-  if (output.filename === "textured_mesh_stable.glb" || output.filename === "textured_mesh.glb") {
+  if (filename === "textured_mesh_stable.glb" || filename === "textured_mesh.glb") {
     return "Textured mesh";
   }
   return output.label || output.filename;
@@ -880,9 +1010,9 @@ function ratingValue(job, target) {
 function ratingOutputs(job) {
   const glbOutputs = (job?.outputs || []).filter((output) => output.format === "glb");
   return {
-    white: glbOutputs.find((output) => output.filename === "white_mesh.glb"),
-    texture: glbOutputs.find((output) => output.filename === "textured_mesh.glb")
-      || glbOutputs.find((output) => output.filename === "textured_mesh_stable.glb"),
+    white: glbOutputs.find((output) => outputBasename(output) === "white_mesh.glb"),
+    texture: glbOutputs.find((output) => outputBasename(output) === "textured_mesh.glb")
+      || glbOutputs.find((output) => outputBasename(output) === "textured_mesh_stable.glb"),
   };
 }
 
@@ -1256,11 +1386,11 @@ function canAddTexture(job) {
 }
 
 function hasWhiteMesh(job) {
-  return (job?.outputs || []).some((output) => output.format === "glb" && output.filename === "white_mesh.glb");
+  return (job?.outputs || []).some((output) => output.format === "glb" && outputBasename(output) === "white_mesh.glb");
 }
 
 function hasTexturedMesh(job) {
-  return (job?.outputs || []).some((output) => output.format === "glb" && output.filename.startsWith("textured_mesh"));
+  return (job?.outputs || []).some((output) => output.format === "glb" && outputBasename(output).startsWith("textured_mesh"));
 }
 
 function canRebakeTexture(job) {
@@ -1327,6 +1457,7 @@ async function addTextureToCurrentJob() {
       throw new Error(payload.error || response.statusText);
     }
     localStorage.setItem("lgo.lastJobId", payload.id);
+    localStorage.removeItem("lgo.lastTextureVersionId");
     renderJob(payload);
     void loadHistory();
     if (payload.id && !terminalStatuses.has(payload.status)) {
@@ -1374,6 +1505,7 @@ async function rebakeTextureForCurrentJob() {
       throw new Error(payload.error || response.statusText);
     }
     localStorage.setItem("lgo.lastJobId", payload.id);
+    localStorage.removeItem("lgo.lastTextureVersionId");
     renderJob(payload, { preferredScene: "texture" });
     void loadHistory();
     if (payload.id && !terminalStatuses.has(payload.status)) {
@@ -1510,6 +1642,11 @@ function outputUrl(jobId, filename, cacheKey = "") {
   return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }
 
+function outputBasename(output) {
+  const filename = typeof output === "string" ? output : output?.filename || "";
+  return String(filename).split(/[\\/]/).pop() || "";
+}
+
 function readableStatus(status) {
   return (status || "idle").replaceAll("_", " ");
 }
@@ -1537,9 +1674,14 @@ function objectTypeLabel(value) {
 function restoreLastJob() {
   const query = new URLSearchParams(window.location.search);
   const lastJobId = query.get("job") || localStorage.getItem("lgo.lastJobId");
+  const textureVersionId = query.get("texture") || localStorage.getItem("lgo.lastTextureVersionId");
   if (lastJobId) {
     localStorage.setItem("lgo.lastJobId", lastJobId);
-    pollJob(lastJobId);
+    if (textureVersionId) {
+      void loadHistoryTexture(lastJobId, textureVersionId);
+    } else {
+      pollJob(lastJobId);
+    }
   }
 }
 

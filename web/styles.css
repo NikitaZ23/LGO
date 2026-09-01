@@ -508,8 +508,8 @@ button:disabled {
 }
 
 .history-filter {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-width: 220px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 300px;
 }
 
 .history-filter button {

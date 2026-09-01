@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -78,7 +79,11 @@ class GenerationService:
         if extra_args:
             command.extend(extra_args)
 
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        popen_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            popen_kwargs["start_new_session"] = True
         with log_path.open("ab") as log:
             process = subprocess.Popen(
                 command,
@@ -86,7 +91,7 @@ class GenerationService:
                 env=env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                creationflags=creationflags,
+                **popen_kwargs,
             )
 
         return {
@@ -140,3 +145,37 @@ class GenerationService:
             }
         )
         return env
+
+    def stop_process_tree(self, process_id: Any) -> dict[str, Any]:
+        try:
+            pid = int(process_id)
+        except (TypeError, ValueError):
+            return {"pid": process_id, "ok": False, "reason": "missing process id"}
+        if pid <= 0 or pid == os.getpid():
+            return {"pid": pid, "ok": False, "reason": "invalid process id"}
+
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            output = (result.stdout or result.stderr or "").strip()
+            return {
+                "pid": pid,
+                "ok": result.returncode == 0,
+                "returncode": result.returncode,
+                "output": output[-1000:],
+            }
+
+        try:
+            os.killpg(pid, signal.SIGTERM)
+            return {"pid": pid, "ok": True, "signal": "SIGTERM"}
+        except ProcessLookupError:
+            return {"pid": pid, "ok": True, "reason": "process not found"}
+        except Exception as exc:  # noqa: BLE001 - shutdown should report any local process issue.
+            return {"pid": pid, "ok": False, "reason": str(exc)}
