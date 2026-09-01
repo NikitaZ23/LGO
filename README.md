@@ -122,6 +122,8 @@ E:\AI\Models\Hunyuan3D-Paint-v2-1\hy3dpaint\ckpt\RealESRGAN_x4plus.pth
 .\start-lgo-background.bat
 ```
 
+Если `.venv` ещё не создан после `git clone`, стартовые батники предложат создать его через `scripts\setup_venv.ps1`.
+
 Остановка:
 
 ```powershell

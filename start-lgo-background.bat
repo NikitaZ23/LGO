@@ -8,6 +8,7 @@ set "LGO_RUNS_DIR=%LGO_ROOT%runs"
 set "LGO_LOG_DIR=%LGO_ROOT%logs"
 set "LGO_CACHE_DIR=%LGO_ROOT%.cache"
 set "LGO_START_SCRIPT=%LGO_ROOT%scripts\start_background.ps1"
+set "LGO_SETUP_SCRIPT=%LGO_ROOT%scripts\setup_venv.ps1"
 set "HF_HOME=%LGO_CACHE_DIR%\huggingface"
 set "HF_HUB_CACHE=%HF_HOME%\hub"
 set "TRANSFORMERS_CACHE=%HF_HOME%\transformers"
@@ -22,9 +23,27 @@ if not exist "%TRANSFORMERS_CACHE%" mkdir "%TRANSFORMERS_CACHE%"
 
 if not exist "%LGO_PYTHON%" (
   echo LGO virtual environment was not found: %LGO_PYTHON%
-  echo Run scripts\setup_venv.ps1 first.
-  pause
-  exit /b 1
+  if not exist "%LGO_SETUP_SCRIPT%" (
+    echo Setup script was not found:
+    echo   %LGO_SETUP_SCRIPT%
+    pause
+    exit /b 1
+  )
+  echo.
+  choice /C YN /M "Create .venv now with scripts\setup_venv.ps1?"
+  if errorlevel 2 exit /b 1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%LGO_SETUP_SCRIPT%"
+  if errorlevel 1 (
+    echo Failed to create LGO virtual environment.
+    pause
+    exit /b 1
+  )
+  if not exist "%LGO_PYTHON%" (
+    echo Setup finished, but Python was still not found:
+    echo   %LGO_PYTHON%
+    pause
+    exit /b 1
+  )
 )
 
 if not exist "%LGO_START_SCRIPT%" (
