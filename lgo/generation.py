@@ -50,6 +50,9 @@ class GenerationService:
     def start_texture(self, job: dict[str, Any]) -> dict[str, Any]:
         return self._start_runner(job, ["--texture-only"])
 
+    def start_texture_rebake(self, job: dict[str, Any]) -> dict[str, Any]:
+        return self._start_runner(job, ["--rebake-texture"])
+
     def _start_runner(self, job: dict[str, Any], extra_args: list[str] | None = None) -> dict[str, Any]:
         run_dir = Path(job["run_dir"])
         log_path = run_dir / "run.log"

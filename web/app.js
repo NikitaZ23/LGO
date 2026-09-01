@@ -4,6 +4,7 @@ const restartServiceButton = document.querySelector("#restartService");
 const shutdownServiceButton = document.querySelector("#shutdownService");
 const form = document.querySelector("#jobForm");
 const addTextureButton = document.querySelector("#addTextureButton");
+const rebakeTextureButton = document.querySelector("#rebakeTextureButton");
 const modeInput = document.querySelector("#mode");
 const qualityInput = document.querySelector("#quality");
 const objectTypeInput = document.querySelector("#objectType");
@@ -48,6 +49,7 @@ const progressByStatus = {
   queued_texture: 76,
   running_texture: 78,
   applying_texture: 82,
+  rebaking_texture: 88,
   converting_outputs: 92,
   completed_with_warnings: 100,
   completed: 100,
@@ -59,6 +61,7 @@ let pollTimer = null;
 let currentJobId = null;
 let currentJob = null;
 let textureButtonJobId = null;
+let rebakeTextureJobId = null;
 let historyJobs = [];
 let historyLoaded = false;
 let historyFilter = localStorage.getItem("lgo.historyFilter") || "all";
@@ -195,6 +198,9 @@ historyFilterButtons.forEach((button) => {
 });
 
 addTextureButton.addEventListener("click", addTextureToCurrentJob);
+if (rebakeTextureButton) {
+  rebakeTextureButton.addEventListener("click", rebakeTextureForCurrentJob);
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1109,10 +1115,19 @@ function restoreFile(record, target) {
 }
 
 function updateAddTextureButton(job) {
-  const available = canAddTexture(job);
-  textureButtonJobId = available ? job.id : null;
-  addTextureButton.disabled = !available;
+  const textureAvailable = canAddTexture(job);
+  textureButtonJobId = textureAvailable ? job.id : null;
+  addTextureButton.disabled = !textureAvailable;
   addTextureButton.textContent = textureActionLabel(job);
+
+  const rebakeAvailable = canRebakeTexture(job);
+  rebakeTextureJobId = rebakeAvailable ? job.id : null;
+  if (rebakeTextureButton) {
+    rebakeTextureButton.disabled = !rebakeAvailable;
+    rebakeTextureButton.title = rebakeAvailable
+      ? "Re-apply the existing texture colors to the white mesh geometry."
+      : "Available after a textured model exists.";
+  }
 }
 
 function canAddTexture(job) {
@@ -1131,6 +1146,16 @@ function hasWhiteMesh(job) {
 
 function hasTexturedMesh(job) {
   return (job?.outputs || []).some((output) => output.format === "glb" && output.filename.startsWith("textured_mesh"));
+}
+
+function canRebakeTexture(job) {
+  if (!job || !job.id || !terminalStatuses.has(job.status)) {
+    return false;
+  }
+  if (job.status === "failed" || job.status === "needs_runtime") {
+    return false;
+  }
+  return hasWhiteMesh(job) && hasTexturedMesh(job);
 }
 
 function textureActionLabel(job) {
@@ -1176,6 +1201,48 @@ async function addTextureToCurrentJob() {
     setProgress("failed", "Texture pass could not be started.");
     runBadge.textContent = "Failed";
     jobStatus.textContent += `\n\nAdd texture failed: ${error}`;
+    updateAddTextureButton(currentJob);
+  }
+}
+
+async function rebakeTextureForCurrentJob() {
+  if (!rebakeTextureJobId) {
+    return;
+  }
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  if (rebakeTextureButton) {
+    rebakeTextureButton.disabled = true;
+  }
+  const textureQuality = textureQualityInput.value || "fast";
+  const objectType = objectTypeInput.value || "organic";
+  setProgress("queued_texture", `Queuing ${textureQualityLabel(textureQuality)} color re-bake...`);
+  runBadge.textContent = "queued rebake";
+
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodeURIComponent(rebakeTextureJobId)}/rebake-texture?texture_quality=${encodeURIComponent(textureQuality)}&object_type=${encodeURIComponent(objectType)}`,
+      {
+        method: "POST",
+      },
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || response.statusText);
+    }
+    localStorage.setItem("lgo.lastJobId", payload.id);
+    renderJob(payload, { preferredScene: "texture" });
+    void loadHistory();
+    if (payload.id && !terminalStatuses.has(payload.status)) {
+      pollJob(payload.id);
+    }
+  } catch (error) {
+    setProgress("failed", "Texture color re-bake could not be started.");
+    runBadge.textContent = "Failed";
+    jobStatus.textContent += `\n\nRe-bake color failed: ${error}`;
     updateAddTextureButton(currentJob);
   }
 }

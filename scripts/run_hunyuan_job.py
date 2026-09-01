@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--texture-only", action="store_true")
+    parser.add_argument("--rebake-texture", action="store_true")
     args = parser.parse_args()
 
     config = _read_config(args.config)
@@ -37,7 +38,9 @@ def main() -> None:
         return
 
     try:
-        if args.texture_only:
+        if args.rebake_texture:
+            _run_texture_rebake(args.job, config, job)
+        elif args.texture_only:
             _run_texture_only(args.job, config, job)
         else:
             _run_generation(args.job, config, job)
@@ -212,6 +215,92 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
         "object_type": object_type,
         "texture_added": True,
         "texture_elapsed_seconds": elapsed,
+    }
+    if job.get("quality"):
+        final_update["quality"] = job["quality"]
+    _update_job(job_path, status, message, **final_update)
+
+
+def _run_texture_rebake(job_path: Path, config: dict[str, Any], job: dict[str, Any]) -> None:
+    started_at = time.time()
+    payload = job["payload"]
+    payload["texture"] = True
+    config, texture_quality = _apply_texture_quality_preset(config, payload)
+    config, object_type = _apply_object_type_preset(config, payload)
+    output_dir = Path(job["output_dir"])
+    shape_glb = output_dir / "white_mesh.glb"
+    textured_obj = output_dir / "textured_mesh.obj"
+    albedo_path = output_dir / "textured_mesh.jpg"
+    textured_glb = output_dir / "textured_mesh.glb"
+
+    for required_path in (shape_glb, textured_obj, albedo_path):
+        if not required_path.exists():
+            raise FileNotFoundError(f"Texture re-bake input was not found: {required_path}")
+
+    update = {
+        "payload": payload,
+        "texture_quality": texture_quality,
+        "object_type": object_type,
+    }
+    if job.get("quality"):
+        update["quality"] = job["quality"]
+    _update_job(
+        job_path,
+        "rebaking_texture",
+        f"Re-baking existing texture colors. Texture speed: {texture_quality['label']}.",
+        **update,
+    )
+
+    mesh = _load_mesh(shape_glb)
+    images = _load_existing_images_for_texture(job)
+    textured_postprocess = _bake_texture_to_shape_mesh(
+        mesh,
+        textured_obj,
+        albedo_path,
+        textured_glb,
+        config,
+        _primary_image(images),
+    )
+
+    warnings = [
+        item
+        for item in job.get("warnings", [])
+        if "Texture bake to white mesh failed" not in item and "Texture color re-bake failed" not in item
+    ]
+    postprocessing = job.get("postprocessing", {})
+    postprocessing["texture_bake"] = textured_postprocess
+
+    outputs = [_output("glb", shape_glb, "White mesh GLB")]
+    if textured_postprocess.get("applied") and textured_glb.exists():
+        outputs.append(_output("glb", textured_glb, "Textured mesh GLB"))
+    else:
+        if textured_glb.exists():
+            outputs.append(_output("glb", textured_glb, "Textured mesh GLB"))
+        warnings.append(
+            "Texture color re-bake failed; kept previous textured output."
+        )
+
+    outputs.extend(
+        output for output in job.get("outputs", [])
+        if output.get("filename") not in {"white_mesh.glb", "textured_mesh.glb"}
+    )
+
+    elapsed = round(time.time() - started_at, 2)
+    status = "completed_with_warnings" if warnings else "completed"
+    message = f"Texture color re-bake completed in {elapsed}s."
+    if warnings:
+        message += " " + " ".join(warnings)
+
+    final_update = {
+        "payload": payload,
+        "outputs": outputs,
+        "warnings": warnings,
+        "postprocessing": postprocessing,
+        "texture_quality": texture_quality,
+        "object_type": object_type,
+        "texture_added": True,
+        "texture_rebaked": True,
+        "texture_rebake_elapsed_seconds": elapsed,
     }
     if job.get("quality"):
         final_update["quality"] = job["quality"]
@@ -1358,7 +1447,14 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         texture_material = _stabilize_pbr_textures(textures, config)
         create_glb_with_pbr_materials(str(textured_obj), textures, str(remesh_glb))
         _append_log("Baking texture colors back onto the white mesh geometry.")
-        textured_postprocess = _bake_texture_to_shape_mesh(mesh, textured_obj, Path(textures["albedo"]), textured_glb, config)
+        textured_postprocess = _bake_texture_to_shape_mesh(
+            mesh,
+            textured_obj,
+            Path(textures["albedo"]),
+            textured_glb,
+            config,
+            _primary_image(images),
+        )
         warning = None
         if not textured_postprocess.get("applied"):
             warning = "Texture bake to white mesh failed; using the paint remesh geometry."
@@ -1379,7 +1475,14 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         return None, f"Texture failed, kept white mesh: {exc}", None
 
 
-def _bake_texture_to_shape_mesh(shape_mesh, textured_obj: Path, albedo_path: Path, target_glb: Path, config: dict[str, Any]) -> dict[str, Any]:
+def _bake_texture_to_shape_mesh(
+    shape_mesh,
+    textured_obj: Path,
+    albedo_path: Path,
+    target_glb: Path,
+    config: dict[str, Any],
+    reference_image: Image.Image | None = None,
+) -> dict[str, Any]:
     report: dict[str, Any] = {
         "enabled": True,
         "applied": False,
@@ -1445,6 +1548,8 @@ def _bake_texture_to_shape_mesh(shape_mesh, textured_obj: Path, albedo_path: Pat
                 source_colors,
             )
 
+        colors, color_report = _adjust_baked_vertex_colors(colors, config, reference_image)
+
         vertex_colors = np.column_stack(
             [
                 np.clip(colors, 0, 255).astype(np.uint8),
@@ -1464,6 +1569,7 @@ def _bake_texture_to_shape_mesh(shape_mesh, textured_obj: Path, albedo_path: Pat
                 "source_faces": int(len(source_mesh.faces)),
                 "texture_size": [int(source_image.shape[1]), int(source_image.shape[0])],
                 "transfer": transfer_report,
+                "color": color_report,
             }
         )
         report["shade_smooth"] = _shade_smooth_glb(config, target_glb)
@@ -1691,6 +1797,153 @@ def _sample_texture_rgb(image_array, uv):
     top = image_array[y0, x0] * (1.0 - wx) + image_array[y0, x1] * wx
     bottom = image_array[y1, x0] * (1.0 - wx) + image_array[y1, x1] * wx
     return (top * (1.0 - wy) + bottom * wy).astype(np.float32)
+
+
+def _adjust_baked_vertex_colors(colors, config: dict[str, Any], reference_image: Image.Image | None):
+    settings = config.get("postprocess", {}).get("texture_bake", {})
+    report: dict[str, Any] = {
+        "enabled": bool(settings.get("enabled", True)),
+        "applied": False,
+        "stats_before": _color_array_stats(colors),
+    }
+    if not report["enabled"]:
+        report["stats_after"] = report["stats_before"]
+        return colors, report
+
+    import numpy as np
+
+    adjusted = np.asarray(colors, dtype=np.float32).copy()
+    palette_report = _reference_palette_match(adjusted, reference_image, settings)
+    if palette_report.get("applied"):
+        adjusted = palette_report.pop("colors")
+        report["applied"] = True
+    report["palette_match"] = palette_report
+
+    saturation = float(settings.get("saturation", 1.0))
+    if saturation > 0 and abs(saturation - 1.0) > 0.001:
+        luma = _rgb_luma(adjusted)[:, None]
+        adjusted = luma + (adjusted - luma) * saturation
+        report["applied"] = True
+        report["saturation"] = saturation
+
+    contrast = float(settings.get("contrast", 1.0))
+    if contrast > 0 and abs(contrast - 1.0) > 0.001:
+        adjusted = (adjusted - 127.5) * contrast + 127.5
+        report["applied"] = True
+        report["contrast"] = contrast
+
+    brightness = float(settings.get("brightness", 1.0))
+    if brightness > 0 and abs(brightness - 1.0) > 0.001:
+        adjusted *= brightness
+        report["applied"] = True
+        report["brightness"] = brightness
+
+    gamma = float(settings.get("gamma", 1.0))
+    if gamma > 0 and abs(gamma - 1.0) > 0.001:
+        normalized = np.clip(adjusted / 255.0, 0.0, 1.0)
+        adjusted = np.power(normalized, gamma) * 255.0
+        report["applied"] = True
+        report["gamma"] = gamma
+
+    target_luma = float(settings.get("target_luma_mean", 0) or 0)
+    if target_luma > 0:
+        current_luma = float(np.mean(_rgb_luma(adjusted))) if len(adjusted) else 0.0
+        if current_luma > 1e-6:
+            min_gain = float(settings.get("min_luma_gain", 0.72))
+            max_gain = float(settings.get("max_luma_gain", 1.35))
+            gain = max(min_gain, min(max_gain, target_luma / current_luma))
+            if abs(gain - 1.0) > 0.001:
+                adjusted *= gain
+                report["applied"] = True
+            report["luma_gain"] = round(gain, 4)
+
+    adjusted = np.clip(adjusted, 0, 255).astype(np.float32)
+    report["stats_after"] = _color_array_stats(adjusted)
+    return adjusted, report
+
+
+def _reference_palette_match(colors, reference_image: Image.Image | None, settings: dict[str, Any]) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "enabled": bool(settings.get("palette_match", True)),
+        "applied": False,
+    }
+    if not report["enabled"] or reference_image is None:
+        if reference_image is None:
+            report["reason"] = "missing reference image"
+        return report
+
+    import numpy as np
+
+    reference_colors = _reference_image_colors(reference_image, settings)
+    if reference_colors is None or len(reference_colors) < 64:
+        report["reason"] = "not enough reference foreground pixels"
+        return report
+
+    source_mean = np.mean(colors, axis=0)
+    source_std = np.maximum(np.std(colors, axis=0), 1.0)
+    reference_mean = np.mean(reference_colors, axis=0)
+    reference_std = np.maximum(np.std(reference_colors, axis=0), 1.0)
+    matched = (colors - source_mean) / source_std * reference_std + reference_mean
+
+    blend = max(0.0, min(1.0, float(settings.get("palette_blend", 0.55))))
+    report.update(
+        {
+            "applied": blend > 0,
+            "blend": round(blend, 4),
+            "source_mean": [round(float(value), 2) for value in source_mean],
+            "reference_mean": [round(float(value), 2) for value in reference_mean],
+            "source_std": [round(float(value), 2) for value in source_std],
+            "reference_std": [round(float(value), 2) for value in reference_std],
+            "reference_pixels": int(len(reference_colors)),
+        }
+    )
+    if blend <= 0:
+        return report
+
+    report["colors"] = colors * (1.0 - blend) + matched * blend
+    return report
+
+
+def _reference_image_colors(image: Image.Image, settings: dict[str, Any]):
+    import numpy as np
+
+    rgba = image.convert("RGBA")
+    array = np.asarray(rgba, dtype=np.float32)
+    rgb = array[:, :, :3].reshape(-1, 3)
+    alpha = array[:, :, 3].reshape(-1)
+    luma = _rgb_luma(rgb)
+
+    alpha_threshold = float(settings.get("reference_alpha_threshold", 24))
+    min_luma = float(settings.get("reference_min_luma", 8))
+    max_luma = float(settings.get("reference_max_luma", 248))
+    mask = (alpha > alpha_threshold) & (luma >= min_luma) & (luma <= max_luma)
+    if np.count_nonzero(mask) < 64:
+        mask = alpha > alpha_threshold
+    if np.count_nonzero(mask) < 64:
+        return None
+    return rgb[mask]
+
+
+def _color_array_stats(colors) -> dict[str, Any]:
+    import numpy as np
+
+    array = np.asarray(colors, dtype=np.float32)
+    if array.size == 0:
+        return {"count": 0}
+    luma = _rgb_luma(array)
+    return {
+        "count": int(len(array)),
+        "mean": [round(float(value), 2) for value in np.mean(array, axis=0)],
+        "std": [round(float(value), 2) for value in np.std(array, axis=0)],
+        "luma_mean": round(float(np.mean(luma)), 2),
+    }
+
+
+def _rgb_luma(colors):
+    import numpy as np
+
+    array = np.asarray(colors, dtype=np.float32)
+    return array[..., 0] * 0.2126 + array[..., 1] * 0.7152 + array[..., 2] * 0.0722
 
 
 def _stabilize_pbr_textures(textures: dict[str, str], config: dict[str, Any]) -> dict[str, Any]:
@@ -2197,6 +2450,8 @@ def _convert_extra_formats(
         if fmt not in {"obj", "fbx", "ply", "stl"}:
             continue
         target = output_dir / f"{primary_glb.stem}.{fmt}"
+        if fmt == "obj" and target.exists():
+            target = output_dir / f"{primary_glb.stem}_export.{fmt}"
         subprocess.run(
             [
                 str(blender),

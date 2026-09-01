@@ -90,6 +90,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
             parts = request_path.strip("/").split("/")
             if len(parts) == 4 and parts[3] == "texture":
                 return self._add_texture(parts[2], _texture_quality_query(query), _object_type_query(query))
+            if len(parts) == 4 and parts[3] == "rebake-texture":
+                return self._rebake_texture(parts[2], _texture_quality_query(query), _object_type_query(query))
             if len(parts) == 4 and parts[3] == "rating":
                 return self._rate_job(parts[2])
             return self._json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
@@ -185,6 +187,59 @@ class LGOHandler(SimpleHTTPRequestHandler):
                 )
                 process_info = GENERATOR.start_texture(job)
                 job = STORE.update(job, "running_texture", "Texture pass started.", **process_info)
+        except Exception as exc:  # noqa: BLE001 - surface local service errors as JSON.
+            job = STORE.update(job, "failed", str(exc))
+
+        return self._json(job)
+
+    def _rebake_texture(self, job_id: str, texture_quality: str, object_type: str | None) -> None:
+        job = STORE.get(job_id)
+        if job is None:
+            return self._json({"error": "Job not found."}, HTTPStatus.NOT_FOUND)
+        if job.get("status") not in {"completed", "completed_with_warnings"}:
+            return self._json({"error": "The texture must finish before color re-bake can run."}, HTTPStatus.CONFLICT)
+
+        output_dir = Path(job["output_dir"])
+        required = [output_dir / "white_mesh.glb", output_dir / "textured_mesh.obj", output_dir / "textured_mesh.jpg"]
+        missing = [path.name for path in required if not path.exists()]
+        if missing:
+            return self._json(
+                {
+                    "error": (
+                        "Texture re-bake needs white_mesh.glb, textured_mesh.obj, and textured_mesh.jpg. "
+                        f"Missing: {', '.join(missing)}"
+                    )
+                },
+                HTTPStatus.CONFLICT,
+            )
+
+        payload = job.get("payload", {})
+        payload["texture"] = True
+        payload["texture_quality"] = texture_quality
+        if object_type:
+            payload["object_type"] = object_type
+        else:
+            payload.setdefault("object_type", _default_object_type())
+        job["payload"] = payload
+        STORE.write(job)
+
+        try:
+            manifest = GENERATOR.prepare(job)
+            if not GENERATOR.can_run_real_generation():
+                message = (
+                    "Texture color re-bake saved. Hunyuan3D source runtime is not installed yet, "
+                    "so the runner is not connected."
+                )
+                job = STORE.update(job, "needs_runtime", message, manifest=str(Path(job["run_dir"]) / "manifest.json"))
+            else:
+                job = STORE.update(
+                    job,
+                    "queued_texture",
+                    "Texture color re-bake queued.",
+                    manifest=str(Path(job["run_dir"]) / "manifest.json"),
+                )
+                process_info = GENERATOR.start_texture_rebake(job)
+                job = STORE.update(job, "running_texture", "Texture color re-bake started.", **process_info)
         except Exception as exc:  # noqa: BLE001 - surface local service errors as JSON.
             job = STORE.update(job, "failed", str(exc))
 
