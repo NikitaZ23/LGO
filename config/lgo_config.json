@@ -285,6 +285,112 @@
         }
       }
     },
+    "building": {
+      "label": "Building",
+      "preprocess": {
+        "edge_feather": 0.18,
+        "detail_enhance": {
+          "enabled": true,
+          "contrast": 1.1,
+          "sharpness_radius": 0.65,
+          "sharpness_percent": 145,
+          "sharpness_threshold": 2
+        }
+      },
+      "postprocess": {
+        "smooth": {
+          "enabled": true,
+          "method": "humphrey",
+          "iterations": 2,
+          "alpha": 0.05,
+          "beta": 0.18
+        },
+        "textured_subdivide": {
+          "enabled": false,
+          "iterations": 0,
+          "max_iterations": 0,
+          "max_faces": 0
+        },
+        "textured_smooth": {
+          "enabled": true,
+          "method": "humphrey",
+          "iterations": 2,
+          "alpha": 0.06,
+          "beta": 0.2
+        },
+        "texture_prompt": {
+          "enabled": true,
+          "save": true,
+          "contrast": 0.96,
+          "brightness": 1.02,
+          "color": 0.9,
+          "sharpness": 1.02,
+          "gamma": 1.0,
+          "border_dark_background": {
+            "enabled": true,
+            "threshold": 18,
+            "fill": [86, 86, 82],
+            "blend": 0.85
+          }
+        },
+        "texture_material": {
+          "albedo_median_blend": 0.3,
+          "albedo_blur_radius": 0.35,
+          "albedo_shadow_lift": 8,
+          "albedo_brightness": 0.98,
+          "albedo_color": 0.86,
+          "albedo_contrast": 1.04,
+          "albedo_tone_balance": true,
+          "albedo_min_luma_mean": 48,
+          "albedo_target_luma_mean": 82,
+          "albedo_max_gain": 1.35,
+          "metallic_scale": 0,
+          "metallic_max": 0,
+          "roughness_lift": 150,
+          "roughness_min": 225,
+          "roughness_max": 255,
+          "glb_metallic_factor": 0,
+          "glb_roughness_factor": 1,
+          "drop_metallic_roughness_texture": false
+        },
+        "texture_bake": {
+          "enabled": true,
+          "palette_match": true,
+          "palette_blend": 0.48,
+          "saturation": 0.9,
+          "contrast": 1.03,
+          "brightness": 0.98,
+          "gamma": 1.0,
+          "albedo_gain": 1.0,
+          "target_luma_mean": 82,
+          "min_luma_gain": 0.86,
+          "max_luma_gain": 1.18,
+          "reference_alpha_threshold": 24,
+          "reference_min_luma": 10,
+          "reference_max_luma": 245,
+          "dark_spot_cleanup": {
+            "enabled": true,
+            "max_luma": 34,
+            "target_luma": 54,
+            "target_rgb": [74, 74, 72],
+            "target_blend": 0.5,
+            "blend": 0.35
+          }
+        },
+        "finger_guard": {
+          "enabled": false
+        },
+        "toe_guard": {
+          "enabled": false
+        },
+        "floor_plate": {
+          "enabled": false
+        },
+        "shade_smooth": {
+          "enabled": true
+        }
+      }
+    },
     "rock": {
       "label": "Rock / stone",
       "preprocess": {

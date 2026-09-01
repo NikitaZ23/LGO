@@ -451,6 +451,9 @@ def _object_type_alias(value: Any) -> str:
         "human": "character",
         "rock_stone": "rock",
         "rock / stone": "rock",
+        "architecture": "building",
+        "architectural": "building",
+        "house": "building",
         "hard surface": "hard_surface",
     }
     return aliases.get(normalized, normalized)

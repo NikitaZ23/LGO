@@ -77,9 +77,11 @@ const persistedFiles = new Map();
 const inputDbName = "lgo-input-cache";
 const inputStoreName = "files";
 let inputDbPromise = null;
-const objectTypeValues = ["character", "rock", "hard_surface", "cloth", "creature"];
+const objectTypeValues = ["character", "rock", "building", "hard_surface", "cloth", "creature"];
 const objectTypeAliases = {
   organic: "character",
+  architecture: "building",
+  house: "building",
 };
 const rebakeAlbedoRange = {
   min: 0.5,
@@ -1670,6 +1672,7 @@ function objectTypeLabel(value) {
     character: "Character",
     organic: "Character",
     rock: "Rock / stone",
+    building: "Building",
     hard_surface: "Hard surface",
     cloth: "Cloth",
     creature: "Creature",
