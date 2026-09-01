@@ -645,7 +645,7 @@ function renderOutputs(job, options = {}) {
   renderViewerChoices(job, viewerChoices);
   renderRatings(job, whiteGlb, texturedGlb);
 
-  outputs.forEach((output) => {
+  uniqueOutputs(outputs).forEach((output) => {
     const link = document.createElement("a");
     link.href = outputUrl(job.id, output.filename, outputCacheKey(job, output));
     link.textContent = output.label || output.format.toUpperCase();
@@ -926,6 +926,18 @@ async function saveRating(target, rating) {
     }
     jobStatus.textContent += `\n\nRating save failed: ${error}`;
   }
+}
+
+function uniqueOutputs(outputs) {
+  const seen = new Set();
+  return outputs.filter((output) => {
+    const key = `${output.format || ""}:${output.filename || ""}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function setupSmoothSceneZoom() {

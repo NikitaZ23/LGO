@@ -2529,7 +2529,7 @@ def _convert_extra_formats(
             ],
             check=True,
         )
-        outputs.append(_output(fmt, target, f"{fmt.upper()} export"))
+        outputs.append(_output(fmt, target, _output_label(target, fmt)))
     return outputs
 
 
@@ -2606,6 +2606,18 @@ def _output(fmt: str, path: Path, label: str) -> dict[str, str]:
         "path": str(path),
         "label": label,
     }
+
+
+def _output_label(path: Path, fmt: str) -> str:
+    labels = {
+        "textured_mesh.glb": "Textured mesh GLB",
+        "textured_mesh.fbx": "Textured mesh FBX",
+        "textured_mesh.obj": "Textured mesh OBJ",
+        "white_mesh.glb": "White mesh GLB",
+        "white_mesh.fbx": "White mesh FBX",
+        "white_mesh.obj": "White mesh OBJ",
+    }
+    return labels.get(path.name, f"{fmt.upper()} export")
 
 
 def _read_config(path: Path) -> dict[str, Any]:

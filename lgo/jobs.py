@@ -120,7 +120,7 @@ class JobStore:
                     "format": fmt,
                     "filename": filename,
                     "path": str(output_dir / filename) if output_dir else filename,
-                    "label": str(output.get("label") or self.output_label(filename, fmt)),
+                    "label": self.normalized_output_label(output, filename, fmt),
                     **metadata,
                 }
             )
@@ -193,9 +193,22 @@ class JobStore:
         labels = {
             "textured_mesh_stable.glb": "Stable textured mesh GLB",
             "textured_mesh.glb": "Textured mesh GLB",
+            "textured_mesh.fbx": "Textured mesh FBX",
+            "textured_mesh.obj": "Textured mesh OBJ",
+            "textured_mesh_stable.fbx": "Stable textured mesh FBX",
+            "textured_mesh_stable.obj": "Stable textured mesh OBJ",
             "white_mesh.glb": "White mesh GLB",
+            "white_mesh.fbx": "White mesh FBX",
+            "white_mesh.obj": "White mesh OBJ",
         }
         return labels.get(filename, f"{fmt.upper()} export")
+
+    def normalized_output_label(self, output: dict[str, Any], filename: str, fmt: str) -> str:
+        label = str(output.get("label") or "")
+        generic_label = f"{fmt.upper()} export"
+        if not label or label == generic_label:
+            return self.output_label(filename, fmt)
+        return label
 
     def update(self, job: dict[str, Any], status: str, message: str, **extra: Any) -> dict[str, Any]:
         job["status"] = status
