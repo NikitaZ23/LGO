@@ -119,6 +119,8 @@
 
             <input type="hidden" id="quality" name="quality" value="high">
             <input type="hidden" id="objectType" name="object_type" value="character">
+            <input type="hidden" id="scalePreset" name="scale_preset" value="character">
+            <input type="hidden" id="targetHeight" name="target_height_m" value="1.8">
             <input type="hidden" id="texture" name="texture" value="true">
             <input type="hidden" id="textureQuality" name="texture_quality" value="fast">
 
@@ -140,6 +142,25 @@
                 <button type="button" data-object-type="hard_surface">Hard surface</button>
                 <button type="button" data-object-type="cloth">Cloth</button>
                 <button type="button" data-object-type="creature">Creature</button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <span class="field-label">Scale</span>
+              <div class="scale-control">
+                <div class="segmented scale-toggle" role="tablist" aria-label="Export scale">
+                  <button type="button" data-scale-preset="small_prop">Small</button>
+                  <button class="active" type="button" data-scale-preset="character">Character</button>
+                  <button type="button" data-scale-preset="vehicle">Vehicle</button>
+                  <button type="button" data-scale-preset="building">Building</button>
+                  <button type="button" data-scale-preset="monument">Monument</button>
+                  <button type="button" data-scale-preset="custom">Custom</button>
+                </div>
+                <label class="number-control" for="targetHeightValue">
+                  <span>Height</span>
+                  <input id="targetHeightValue" type="number" min="0.01" max="10000" step="0.1" value="1.8">
+                  <span>m</span>
+                </label>
               </div>
             </div>
 
@@ -266,6 +287,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=33"></script>
-  </body>
+  <script src="/app.js?v=34"></script>
+</body>
 </html>

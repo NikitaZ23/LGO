@@ -360,6 +360,39 @@ button:disabled {
   max-width: 560px;
 }
 
+.scale-control {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.scale-toggle {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.number-control {
+  display: grid;
+  grid-template-columns: auto minmax(96px, 140px) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.number-control input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #12161c;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.number-control input:disabled {
+  opacity: 0.58;
+}
+
 .quality-toggle,
 .texture-quality-toggle {
   grid-template-columns: repeat(3, minmax(0, 1fr));

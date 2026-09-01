@@ -8,6 +8,9 @@ const rebakeTextureButton = document.querySelector("#rebakeTextureButton");
 const modeInput = document.querySelector("#mode");
 const qualityInput = document.querySelector("#quality");
 const objectTypeInput = document.querySelector("#objectType");
+const scalePresetInput = document.querySelector("#scalePreset");
+const targetHeightInput = document.querySelector("#targetHeight");
+const targetHeightValueInput = document.querySelector("#targetHeightValue");
 const textureInput = document.querySelector("#texture");
 const textureQualityInput = document.querySelector("#textureQuality");
 const rebakeAlbedoInput = document.querySelector("#rebakeAlbedo");
@@ -20,6 +23,7 @@ const jobStatus = document.querySelector("#jobStatus");
 const modeButtons = document.querySelectorAll("[data-mode]");
 const qualityButtons = document.querySelectorAll("[data-quality]");
 const objectTypeButtons = document.querySelectorAll("[data-object-type]");
+const scalePresetButtons = document.querySelectorAll("[data-scale-preset]");
 const textureButtons = document.querySelectorAll("[data-texture]");
 const textureQualityButtons = document.querySelectorAll("[data-texture-quality]");
 const progressFill = document.querySelector("#progressFill");
@@ -83,6 +87,24 @@ const objectTypeAliases = {
   architecture: "building",
   house: "building",
 };
+const scalePresetValues = ["small_prop", "character", "vehicle", "building", "monument", "custom"];
+const scalePresetHeights = {
+  small_prop: 0.35,
+  character: 1.8,
+  vehicle: 3,
+  building: 24,
+  monument: 50,
+  custom: 1.8,
+};
+const scalePresetByObjectType = {
+  character: "character",
+  rock: "small_prop",
+  building: "building",
+  hard_surface: "small_prop",
+  cloth: "character",
+  creature: "character",
+};
+let scalePresetTouched = false;
 const rebakeAlbedoRange = {
   min: 0.5,
   max: 1.8,
@@ -155,18 +177,80 @@ qualityButtons.forEach((button) => {
   button.addEventListener("click", () => setQuality(button.dataset.quality));
 });
 
-function setObjectType(objectType) {
+function setObjectType(objectType, options = {}) {
   const selected = normalizeObjectType(objectType);
   objectTypeInput.value = selected;
   localStorage.setItem("lgo.objectType", selected);
   objectTypeButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.objectType === selected);
   });
+  if (!options.skipScaleSync && !scalePresetTouched) {
+    setScalePreset(scalePresetByObjectType[selected] || "character", { markTouched: false });
+  }
 }
 
 objectTypeButtons.forEach((button) => {
   button.addEventListener("click", () => setObjectType(button.dataset.objectType));
 });
+
+function setScalePreset(scalePreset, options = {}) {
+  const selected = normalizeScalePreset(scalePreset);
+  if (options.markTouched !== false) {
+    scalePresetTouched = true;
+  }
+  if (scalePresetInput) {
+    scalePresetInput.value = selected;
+  }
+  localStorage.setItem("lgo.scalePreset", selected);
+  scalePresetButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.scalePreset === selected);
+  });
+
+  const isCustom = selected === "custom";
+  if (targetHeightValueInput) {
+    targetHeightValueInput.disabled = !isCustom;
+    if (!isCustom) {
+      targetHeightValueInput.value = String(scalePresetHeights[selected] || scalePresetHeights.character);
+    } else if (!targetHeightValueInput.value) {
+      targetHeightValueInput.value = String(scalePresetHeights.custom);
+    }
+  }
+  syncTargetHeight({ normalizeVisible: true });
+}
+
+scalePresetButtons.forEach((button) => {
+  button.addEventListener("click", () => setScalePreset(button.dataset.scalePreset));
+});
+
+function syncTargetHeight(options = {}) {
+  const selected = normalizeScalePreset(scalePresetInput?.value);
+  const rawValue = selected === "custom"
+    ? targetHeightValueInput?.value
+    : scalePresetHeights[selected];
+  const height = normalizeTargetHeight(rawValue);
+  if (targetHeightInput) {
+    targetHeightInput.value = height.toString();
+  }
+  if (selected === "custom" && options.normalizeVisible && targetHeightValueInput) {
+    targetHeightValueInput.value = height.toString();
+  }
+  localStorage.setItem("lgo.targetHeight", height.toString());
+  return height;
+}
+
+if (targetHeightValueInput) {
+  targetHeightValueInput.addEventListener("input", () => {
+    scalePresetTouched = true;
+    const height = targetHeightNumber(targetHeightValueInput.value);
+    if (height !== null) {
+      if (targetHeightInput) {
+        targetHeightInput.value = height.toString();
+      }
+      localStorage.setItem("lgo.targetHeight", height.toString());
+    }
+  });
+  targetHeightValueInput.addEventListener("change", () => syncTargetHeight({ normalizeVisible: true }));
+}
 
 function setTexture(enabled) {
   textureInput.value = enabled;
@@ -292,6 +376,7 @@ form.addEventListener("submit", async (event) => {
     clearTimeout(pollTimer);
     pollTimer = null;
   }
+  syncTargetHeight({ normalizeVisible: true });
   const data = new FormData(form);
   appendPersistedFiles(data);
   if (!data.has("formats")) {
@@ -350,6 +435,13 @@ function renderJob(job, options = {}) {
   if (job.payload) {
     lines.push(`Quality: ${job.payload.quality || "default"}`);
     lines.push(`Object type: ${objectTypeLabel(job.payload.object_type || job.object_type?.selected)}`);
+    if (job.payload.scale_preset || job.scale) {
+      lines.push(`Scale: ${scaleMeta(job.payload.scale_preset || job.scale?.selected, job.payload.target_height_m || job.scale?.target_height_m)}`);
+      setScalePreset(job.payload.scale_preset || job.scale?.selected, { markTouched: false });
+      if (job.payload.target_height_m || job.scale?.target_height_m) {
+        setTargetHeightValue(job.payload.target_height_m || job.scale?.target_height_m);
+      }
+    }
     lines.push(`Texture: ${job.payload.texture ? "PBR texture" : "No texture"}`);
     lines.push(`Texture speed: ${textureQualityLabel(job.payload.texture_quality || job.texture_quality?.selected)}`);
     if (job.payload.texture_color !== undefined) {
@@ -366,6 +458,9 @@ function renderJob(job, options = {}) {
   }
   if (job.object_type) {
     lines.push(`Applied object preset: ${job.object_type.label || objectTypeLabel(job.object_type.selected)}`);
+  }
+  if (job.scale) {
+    lines.push(`Applied scale: ${scaleMeta(job.scale, job.scale.target_height_m)}`);
   }
   if (job.texture_quality) {
     lines.push(`Applied texture preset: ${job.texture_quality.label || job.texture_quality.selected}`);
@@ -671,11 +766,15 @@ function jobWithTextureVersion(job, version) {
     texture: true,
     texture_quality: version.texture_quality || clone.payload?.texture_quality,
     object_type: version.object_type || clone.payload?.object_type,
+    scale_preset: version.scale_preset || clone.payload?.scale_preset,
+    target_height_m: version.target_height_m ?? clone.payload?.target_height_m,
     rebake_albedo: version.rebake_albedo ?? clone.payload?.rebake_albedo,
     texture_color: version.texture_color ?? clone.payload?.texture_color,
   };
   clone.texture_quality = version.texture_quality || clone.texture_quality;
   clone.object_type = version.object_type || clone.object_type;
+  clone.scale_preset = version.scale_preset || clone.scale_preset;
+  clone.target_height_m = version.target_height_m ?? clone.target_height_m;
   clone.rebake_albedo = version.rebake_albedo ?? clone.rebake_albedo;
   clone.texture_color = version.texture_color ?? clone.texture_color;
   return clone;
@@ -686,12 +785,13 @@ function historyMeta(job) {
   const texture = job.texture ? "texture" : "no texture";
   const quality = job.quality || "default";
   const objectType = objectTypeLabel(job.object_type);
+  const scale = job.target_height_m ? scaleMeta(job.scale_preset, job.target_height_m) : "";
   const textureQuality = `${textureQualityLabel(job.texture_quality)} tex`;
   const albedo = albedoMeta(job.rebake_albedo);
   const color = textureColorMeta(job.texture_color);
   const output = job.primary_output ? job.primary_output.label || job.primary_output.filename : "no model";
   const ratings = ratingMeta(job.ratings);
-  return [mode, quality, objectType, texture, textureQuality, albedo, color, job.status, output, ratings]
+  return [mode, quality, objectType, scale, texture, textureQuality, albedo, color, job.status, output, ratings]
     .filter(Boolean)
     .join(" · ");
 }
@@ -728,11 +828,14 @@ function textureKindLabel(kind) {
 function textureHistoryMeta(job, version) {
   const source = job.display_name || job.id;
   const objectType = objectTypeLabel(version.object_type || job.object_type);
+  const scale = (version.target_height_m ?? job.target_height_m)
+    ? scaleMeta(version.scale_preset || job.scale_preset, version.target_height_m ?? job.target_height_m)
+    : "";
   const textureQuality = `${textureQualityLabel(version.texture_quality || job.texture_quality)} tex`;
   const albedo = albedoMeta(version.rebake_albedo);
   const color = textureColorMeta(version.texture_color);
   const output = version.primary_output?.label || version.primary_output?.filename || "texture";
-  return [source, objectType, textureQuality, albedo, color, output]
+  return [source, objectType, scale, textureQuality, albedo, color, output]
     .filter(Boolean)
     .join(" · ");
 }
@@ -1680,6 +1783,83 @@ function objectTypeLabel(value) {
   return labels[selected] || labels.character;
 }
 
+function scalePresetLabel(value) {
+  const selected = typeof value === "string" ? value : value?.selected;
+  const labels = {
+    small_prop: "Small prop",
+    character: "Character",
+    vehicle: "Vehicle",
+    building: "Building",
+    monument: "Monument",
+    custom: "Custom",
+  };
+  return labels[selected] || "";
+}
+
+function scaleMeta(value, height) {
+  const selected = typeof value === "string" ? value : value?.selected || value?.scale_preset;
+  const label = scalePresetLabel(selected);
+  const sourceHeight = height ?? (typeof value === "object" ? value?.target_height_m : null);
+  const formattedHeight = formatTargetHeight(sourceHeight);
+  return [label, formattedHeight].filter(Boolean).join(" ");
+}
+
+function normalizeScalePreset(value) {
+  const raw = String(value || "character").toLowerCase().replace("-", "_");
+  const aliases = {
+    small: "small_prop",
+    small_prop: "small_prop",
+    "small prop": "small_prop",
+    prop: "small_prop",
+    human: "character",
+    car: "vehicle",
+    auto: "vehicle",
+    house: "building",
+    architecture: "building",
+    custom_height: "custom",
+  };
+  const selected = aliases[raw] || raw;
+  return scalePresetValues.includes(selected) ? selected : "character";
+}
+
+function isKnownScalePreset(value) {
+  const raw = String(value || "").toLowerCase().replace("-", "_");
+  const aliases = new Set([...scalePresetValues, "small", "small prop", "prop", "human", "car", "auto", "house", "architecture", "custom_height"]);
+  return aliases.has(raw);
+}
+
+function targetHeightNumber(value) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.round(Math.max(0.01, Math.min(10000, parsed)) * 1000) / 1000;
+}
+
+function normalizeTargetHeight(value) {
+  return targetHeightNumber(value) ?? scalePresetHeights.character;
+}
+
+function setTargetHeightValue(value) {
+  const height = normalizeTargetHeight(value);
+  if (targetHeightValueInput) {
+    targetHeightValueInput.value = height.toString();
+  }
+  if (targetHeightInput) {
+    targetHeightInput.value = height.toString();
+  }
+  localStorage.setItem("lgo.targetHeight", height.toString());
+}
+
+function formatTargetHeight(value) {
+  const height = targetHeightNumber(value);
+  if (height === null) {
+    return "";
+  }
+  const decimals = height >= 10 ? 1 : 2;
+  return `${height.toFixed(decimals).replace(/\.?0+$/, "")}m`;
+}
+
 function normalizeObjectType(value) {
   const raw = String(value || "character").toLowerCase();
   const selected = objectTypeAliases[raw] || raw;
@@ -1701,6 +1881,7 @@ function restoreLastJob() {
 }
 
 function restoreFormState() {
+  const storedScalePreset = localStorage.getItem("lgo.scalePreset");
   const storedMode = localStorage.getItem("lgo.mode");
   if (storedMode === "single" || storedMode === "multiview") {
     setMode(storedMode);
@@ -1713,9 +1894,19 @@ function restoreFormState() {
 
   const storedObjectType = localStorage.getItem("lgo.objectType");
   if (storedObjectType) {
-    setObjectType(storedObjectType);
+    setObjectType(storedObjectType, { skipScaleSync: isKnownScalePreset(storedScalePreset) });
   } else {
     setObjectType(objectTypeInput.value || "character");
+  }
+
+  if (storedScalePreset && isKnownScalePreset(storedScalePreset)) {
+    scalePresetTouched = true;
+    setScalePreset(storedScalePreset, { markTouched: false });
+    if (normalizeScalePreset(storedScalePreset) === "custom") {
+      setTargetHeightValue(localStorage.getItem("lgo.targetHeight") || scalePresetHeights.custom);
+    }
+  } else {
+    setScalePreset(scalePresetByObjectType[objectTypeInput.value] || scalePresetInput?.value || "character", { markTouched: false });
   }
 
   const storedTexture = localStorage.getItem("lgo.texture");

@@ -56,6 +56,7 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     payload = job["payload"]
     config, quality = _apply_quality_preset(config, payload)
     config, object_type = _apply_object_type_preset(config, payload)
+    scale = _resolve_scale_settings(config, payload)
     output_dir = Path(job["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
@@ -63,9 +64,14 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     _update_job(
         job_path,
         "preprocessing_images",
-        f"Cleaning input background and shadows. Quality: {quality['label']}. Object type: {object_type['label']}.",
+        (
+            "Cleaning input background and shadows. "
+            f"Quality: {quality['label']}. Object type: {object_type['label']}. "
+            f"Scale: {scale['label']} {scale['target_height_m']}m."
+        ),
         quality=quality,
         object_type=object_type,
+        scale=scale,
     )
     images, preprocessing = _load_images(payload, config, job_path)
     warnings.extend(preprocessing.get("warnings", []))
@@ -85,6 +91,8 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
         mesh.export(str(raw_glb))
     mesh, postprocessing = _postprocess_mesh(mesh, config)
     warnings.extend(postprocessing.get("warnings", []))
+    mesh, scale_report = _apply_mesh_scale(mesh, scale)
+    postprocessing["scale"] = scale_report
 
     shape_glb = output_dir / "white_mesh.glb"
     mesh.export(str(shape_glb))
@@ -104,6 +112,7 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
             f"Applying PBR texture. Texture speed: {texture_quality['label']}. Color: {texture_color:.2f}x.",
             texture_quality=texture_quality,
             object_type=object_type,
+            scale=scale,
             texture_color=texture_color,
         )
         textured_glb, warning, textured_postprocess = _try_texture(texture_config, output_dir, mesh, images)
@@ -150,6 +159,7 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
         "postprocessing": postprocessing,
         "quality": quality,
         "object_type": object_type,
+        "scale": scale,
         "elapsed_seconds": elapsed,
     }
     if texture_quality:
@@ -457,6 +467,104 @@ def _object_type_alias(value: Any) -> str:
         "hard surface": "hard_surface",
     }
     return aliases.get(normalized, normalized)
+
+
+def _resolve_scale_settings(config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    presets = config.get("scale_presets", {})
+    generation = config.get("generation", {})
+    default_preset = _scale_preset_alias(generation.get("default_scale_preset", "character"))
+    selected = _scale_preset_alias(payload.get("scale_preset") or default_preset)
+    if selected not in presets:
+        selected = default_preset if default_preset in presets else "character"
+    if selected not in presets and presets:
+        selected = next(iter(presets))
+
+    preset = copy.deepcopy(presets.get(selected, {}))
+    default_height = preset.get("target_height_m", generation.get("default_target_height_m", 1.8))
+    if selected == "custom":
+        target_height = _target_height_value(payload.get("target_height_m"), default_height)
+    else:
+        target_height = _target_height_value(default_height, default_height)
+    vertical_axis = _scale_axis_value(preset.get("vertical_axis", "y"))
+
+    payload["scale_preset"] = selected
+    payload["target_height_m"] = target_height
+
+    return {
+        "selected": selected,
+        "label": preset.get("label", selected.replace("_", " ").title()),
+        "target_height_m": target_height,
+        "vertical_axis": vertical_axis,
+    }
+
+
+def _scale_preset_alias(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "small prop": "small_prop",
+        "small": "small_prop",
+        "prop": "small_prop",
+        "human": "character",
+        "car": "vehicle",
+        "auto": "vehicle",
+        "house": "building",
+        "architecture": "building",
+        "custom_height": "custom",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _target_height_value(value: Any, default_height: Any = 1.8) -> float:
+    try:
+        selected = default_height if value is None or str(value).strip() == "" else value
+        parsed = float(str(selected).replace(",", "."))
+    except (TypeError, ValueError):
+        parsed = float(default_height or 1.8)
+    return round(max(0.01, min(10000.0, parsed)), 3)
+
+
+def _scale_axis_value(value: Any) -> str:
+    axis = str(value or "y").strip().lower()
+    return axis if axis in {"x", "y", "z"} else "y"
+
+
+def _scale_axis_index(axis: str) -> int:
+    return {"x": 0, "y": 1, "z": 2}.get(_scale_axis_value(axis), 1)
+
+
+def _apply_mesh_scale(mesh, scale: dict[str, Any]):
+    try:
+        import numpy as np
+    except Exception as exc:  # noqa: BLE001 - scaling should not prevent a useful model export.
+        return mesh, {"applied": False, "reason": f"numpy unavailable: {exc}"}
+
+    if mesh is None or not hasattr(mesh, "vertices") or len(mesh.vertices) == 0:
+        return mesh, {"applied": False, "reason": "mesh has no vertices"}
+
+    axis = _scale_axis_value(scale.get("vertical_axis", "y"))
+    axis_index = _scale_axis_index(axis)
+    bounds = np.asarray(mesh.bounds, dtype=float)
+    current_height = float(bounds[1][axis_index] - bounds[0][axis_index])
+    target_height = _target_height_value(scale.get("target_height_m"), 1.8)
+    if current_height <= 1e-9 or target_height <= 0:
+        return mesh, {
+            "applied": False,
+            "reason": "mesh height is too small to scale",
+            "axis": axis,
+            "current_height_m": round(current_height, 6),
+            "target_height_m": target_height,
+        }
+
+    factor = target_height / current_height
+    working = mesh.copy()
+    working.apply_scale(factor)
+    return working, {
+        "applied": True,
+        "axis": axis,
+        "current_height_m": round(current_height, 6),
+        "target_height_m": target_height,
+        "scale_factor": round(float(factor), 8),
+    }
 
 
 def _apply_rebake_albedo_override(config: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
@@ -2747,6 +2855,8 @@ def _snapshot_texture_version(
         "created_at": created_at,
         "texture_quality": _preset_selected(texture_quality) or payload.get("texture_quality"),
         "object_type": _preset_selected(object_type) or payload.get("object_type"),
+        "scale_preset": payload.get("scale_preset"),
+        "target_height_m": payload.get("target_height_m"),
         "rebake_albedo": payload.get("rebake_albedo"),
         "texture_color": payload.get("texture_color"),
         "outputs": outputs,

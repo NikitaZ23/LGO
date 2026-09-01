@@ -35,6 +35,8 @@
     "texture_remesh_target": 50000,
     "default_formats": ["glb"],
     "default_object_type": "character",
+    "default_scale_preset": "character",
+    "default_target_height_m": 1.8,
     "allow_fbx": true
   },
   "quality_presets": {
@@ -144,6 +146,38 @@
           "beta": 0.38
         }
       }
+    }
+  },
+  "scale_presets": {
+    "small_prop": {
+      "label": "Small prop",
+      "target_height_m": 0.35,
+      "vertical_axis": "y"
+    },
+    "character": {
+      "label": "Character",
+      "target_height_m": 1.8,
+      "vertical_axis": "y"
+    },
+    "vehicle": {
+      "label": "Vehicle",
+      "target_height_m": 3.0,
+      "vertical_axis": "y"
+    },
+    "building": {
+      "label": "Building",
+      "target_height_m": 24.0,
+      "vertical_axis": "y"
+    },
+    "monument": {
+      "label": "Monument",
+      "target_height_m": 50.0,
+      "vertical_axis": "y"
+    },
+    "custom": {
+      "label": "Custom",
+      "target_height_m": 1.8,
+      "vertical_axis": "y"
     }
   },
   "object_type_presets": {

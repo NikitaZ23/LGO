@@ -152,6 +152,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
         mode = _field(form, "mode", "single")
         quality = _quality_field(form)
         object_type = _object_type_field(form)
+        scale_preset = _scale_preset_field(form)
+        target_height_m = _target_height_field(form, scale_preset)
         texture_quality = _texture_quality_field(form)
         texture_color = _texture_color_field(form)
         texture = _field(form, "texture", "false") == "true"
@@ -161,6 +163,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
             "mode": mode,
             "quality": quality,
             "object_type": object_type,
+            "scale_preset": scale_preset,
+            "target_height_m": target_height_m,
             "texture_quality": texture_quality,
             "texture_color": texture_color,
             "texture": texture,
@@ -484,6 +488,68 @@ def _object_type_query(query: dict[str, list[str]]) -> str | None:
     if "object_type" not in query:
         return None
     return _object_type_value(query.get("object_type", [""])[0])
+
+
+def _default_scale_preset() -> str:
+    default_preset = _scale_preset_alias(CONFIG.get("generation", {}).get("default_scale_preset", "character"))
+    presets = CONFIG.get("scale_presets", {})
+    if default_preset in presets:
+        return default_preset
+    if "character" in presets:
+        return "character"
+    if presets:
+        return next(iter(presets))
+    return "character"
+
+
+def _scale_preset_value(value: str) -> str:
+    scale_preset = _scale_preset_alias(value or _default_scale_preset())
+    presets = CONFIG.get("scale_presets", {})
+    if scale_preset in presets:
+        return scale_preset
+    return _default_scale_preset()
+
+
+def _scale_preset_alias(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "small prop": "small_prop",
+        "small": "small_prop",
+        "prop": "small_prop",
+        "human": "character",
+        "car": "vehicle",
+        "auto": "vehicle",
+        "house": "building",
+        "architecture": "building",
+        "custom_height": "custom",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _scale_preset_field(form: cgi.FieldStorage) -> str:
+    return _scale_preset_value(_field(form, "scale_preset", _default_scale_preset()))
+
+
+def _target_height_field(form: cgi.FieldStorage, scale_preset: str) -> float:
+    value = _field(form, "target_height_m", "")
+    return _target_height_value(value, scale_preset)
+
+
+def _target_height_value(value: Any, scale_preset: str | None = None) -> float:
+    preset_key = _scale_preset_value(scale_preset or _default_scale_preset())
+    preset = CONFIG.get("scale_presets", {}).get(preset_key, {})
+    default_height = preset.get(
+        "target_height_m",
+        CONFIG.get("generation", {}).get("default_target_height_m", 1.8),
+    )
+    if preset_key != "custom":
+        value = default_height
+    try:
+        selected = default_height if value is None or str(value).strip() == "" else value
+        parsed = float(str(selected).replace(",", "."))
+    except (TypeError, ValueError):
+        parsed = float(default_height or 1.8)
+    return round(max(0.01, min(10000.0, parsed)), 3)
 
 
 def _default_texture_quality() -> str:

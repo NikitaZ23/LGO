@@ -25,6 +25,14 @@ class GenerationService:
                 "object_type",
                 self.config.get("generation", {}).get("default_object_type", "character"),
             ),
+            "scale_preset": job["payload"].get(
+                "scale_preset",
+                self.config.get("generation", {}).get("default_scale_preset", "character"),
+            ),
+            "target_height_m": job["payload"].get(
+                "target_height_m",
+                self.config.get("generation", {}).get("default_target_height_m", 1.8),
+            ),
             "texture_quality": job["payload"].get(
                 "texture_quality",
                 self.config.get("generation", {}).get("default_texture_quality", "fast"),
