@@ -102,10 +102,15 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
         )
         textured_glb, warning, textured_postprocess = _try_texture(texture_config, output_dir, mesh, images)
         if textured_postprocess:
-            postprocessing["textured_subdivide"] = textured_postprocess
+            postprocessing["texture_bake"] = textured_postprocess
+            if textured_postprocess.get("fallback_remesh"):
+                postprocessing["textured_subdivide"] = textured_postprocess["fallback_remesh"]
         if textured_glb is not None:
             primary_glb = textured_glb
-            outputs = [_output("glb", textured_glb, "Textured mesh GLB")]
+            outputs = [
+                _output("glb", shape_glb, "White mesh GLB"),
+                _output("glb", textured_glb, "Textured mesh GLB"),
+            ]
         if warning:
             warnings.append(warning)
 
@@ -165,13 +170,18 @@ def _run_texture_only(job_path: Path, config: dict[str, Any], job: dict[str, Any
     warnings = [item for item in job.get("warnings", []) if "Texture failed" not in item]
     postprocessing = job.get("postprocessing", {})
     if textured_postprocess:
-        postprocessing["textured_subdivide"] = textured_postprocess
+        postprocessing["texture_bake"] = textured_postprocess
+        if textured_postprocess.get("fallback_remesh"):
+            postprocessing["textured_subdivide"] = textured_postprocess["fallback_remesh"]
 
     primary_glb = shape_glb
     outputs = [_output("glb", shape_glb, "White mesh GLB")]
     if textured_glb is not None:
         primary_glb = textured_glb
-        outputs = [_output("glb", textured_glb, "Textured mesh GLB")]
+        outputs = [
+            _output("glb", shape_glb, "White mesh GLB"),
+            _output("glb", textured_glb, "Textured mesh GLB"),
+        ]
     if warning:
         warnings.append(warning)
 
@@ -1318,6 +1328,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         white_obj = output_dir / "white_mesh.obj"
         textured_obj = output_dir / "textured_mesh.obj"
         textured_glb = output_dir / "textured_mesh.glb"
+        remesh_glb = output_dir / "textured_mesh.original.glb"
         mesh = _prepare_mesh_for_export(mesh)
         mesh.export(str(white_obj), include_normals=False)
 
@@ -1345,14 +1356,341 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             "roughness": str(textured_obj).replace(".obj", "_roughness.jpg"),
         }
         texture_material = _stabilize_pbr_textures(textures, config)
-        create_glb_with_pbr_materials(str(textured_obj), textures, str(textured_glb))
-        textured_postprocess = _refine_textured_glb(textured_glb, config)
+        create_glb_with_pbr_materials(str(textured_obj), textures, str(remesh_glb))
+        _append_log("Baking texture colors back onto the white mesh geometry.")
+        textured_postprocess = _bake_texture_to_shape_mesh(mesh, textured_obj, Path(textures["albedo"]), textured_glb, config)
+        warning = None
+        if not textured_postprocess.get("applied"):
+            warning = "Texture bake to white mesh failed; using the paint remesh geometry."
+            shutil.copy2(remesh_glb, textured_glb)
+            fallback_report = _refine_textured_glb(textured_glb, config)
+            textured_postprocess["fallback_remesh"] = fallback_report
+            textured_postprocess["warnings"] = [
+                *textured_postprocess.get("warnings", []),
+                warning,
+            ]
         textured_postprocess["texture_prompt"] = texture_prompt_report
         textured_postprocess["texture_material"] = texture_material
-        return textured_glb, None, textured_postprocess
+        textured_postprocess["paint_remesh_glb"] = str(remesh_glb)
+        _append_log(f"Texture bake method: {textured_postprocess.get('method') or 'fallback_remesh'}.")
+        return textured_glb, warning, textured_postprocess
     except Exception as exc:  # noqa: BLE001 - shape output is still useful without texture.
         traceback.print_exc()
         return None, f"Texture failed, kept white mesh: {exc}", None
+
+
+def _bake_texture_to_shape_mesh(shape_mesh, textured_obj: Path, albedo_path: Path, target_glb: Path, config: dict[str, Any]) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "enabled": True,
+        "applied": False,
+        "method": None,
+        "target": str(target_glb),
+        "source_mesh": str(textured_obj),
+        "source_texture": str(albedo_path),
+        "warnings": [],
+    }
+    if not textured_obj.exists():
+        report["reason"] = f"textured OBJ was not found: {textured_obj}"
+        return report
+    if not albedo_path.exists():
+        report["reason"] = f"albedo texture was not found: {albedo_path}"
+        return report
+
+    try:
+        import numpy as np
+        import trimesh
+
+        source_mesh = _load_single_mesh(textured_obj)
+        source_uv = _mesh_uv(source_mesh)
+        source_image = np.asarray(Image.open(albedo_path).convert("RGB"), dtype=np.float32)
+        shape = _prepare_mesh_for_export(shape_mesh)
+        target_vertices = np.asarray(shape.vertices, dtype=np.float64)
+
+        if target_vertices.size == 0 or len(shape.faces) == 0:
+            report["reason"] = "white mesh is empty"
+            return report
+        if source_uv is None:
+            report["warnings"].append("Textured OBJ has no UV coordinates; nearest vertex color fallback will be used.")
+
+        colors = None
+        transfer_report: dict[str, Any] = {}
+        if source_uv is not None:
+            try:
+                colors, transfer_report = _transfer_albedo_by_nearest_surface(
+                    target_vertices,
+                    source_mesh,
+                    source_uv,
+                    source_image,
+                )
+            except Exception as exc:  # noqa: BLE001 - fallback keeps the texture pass usable.
+                report["warnings"].append(f"Nearest surface texture bake skipped: {exc}")
+                try:
+                    colors, transfer_report = _transfer_albedo_by_nearest_faces_kdtree(
+                        target_vertices,
+                        source_mesh,
+                        source_uv,
+                        source_image,
+                    )
+                except Exception as fallback_exc:  # noqa: BLE001 - final fallback is nearest vertices.
+                    report["warnings"].append(f"Nearest face texture bake skipped: {fallback_exc}")
+
+        if colors is None:
+            if source_uv is not None:
+                source_colors = _sample_texture_rgb(source_image, source_uv)
+            else:
+                source_colors = _mesh_vertex_colors(source_mesh)
+            colors, transfer_report = _transfer_albedo_by_nearest_vertices(
+                target_vertices,
+                np.asarray(source_mesh.vertices, dtype=np.float64),
+                source_colors,
+            )
+
+        vertex_colors = np.column_stack(
+            [
+                np.clip(colors, 0, 255).astype(np.uint8),
+                np.full((len(target_vertices), 1), 255, dtype=np.uint8),
+            ]
+        )
+        shape.visual = trimesh.visual.ColorVisuals(mesh=shape, vertex_colors=vertex_colors)
+        shape.export(str(target_glb))
+
+        report.update(
+            {
+                "applied": True,
+                "method": transfer_report.get("method"),
+                "vertices": int(len(shape.vertices)),
+                "faces": int(len(shape.faces)),
+                "source_vertices": int(len(source_mesh.vertices)),
+                "source_faces": int(len(source_mesh.faces)),
+                "texture_size": [int(source_image.shape[1]), int(source_image.shape[0])],
+                "transfer": transfer_report,
+            }
+        )
+        report["shade_smooth"] = _shade_smooth_glb(config, target_glb)
+        report["glb_material"] = _stabilize_glb_pbr_materials(target_glb, config)
+    except Exception as exc:  # noqa: BLE001 - fall back to Hunyuan's remeshed texture output.
+        traceback.print_exc()
+        report["reason"] = str(exc)
+        report["warnings"].append(f"Texture bake to white mesh failed: {exc}")
+    return report
+
+
+def _load_single_mesh(path: Path):
+    import trimesh
+
+    loaded = trimesh.load(str(path), force="scene", process=False)
+    if not hasattr(loaded, "geometry"):
+        return loaded
+    geometries = list(loaded.geometry.values())
+    if not geometries:
+        raise ValueError(f"No geometry found in {path}")
+    if len(geometries) == 1:
+        return geometries[0]
+    combined = trimesh.util.concatenate(tuple(geometries))
+    if _mesh_uv(combined) is None:
+        raise ValueError(f"Multiple geometries in {path} could not be combined with UVs intact.")
+    return combined
+
+
+def _mesh_uv(mesh):
+    visual = getattr(mesh, "visual", None)
+    uv = getattr(visual, "uv", None)
+    if uv is None:
+        return None
+    import numpy as np
+
+    uv = np.asarray(uv, dtype=np.float64)
+    if uv.ndim != 2 or uv.shape[1] < 2 or len(uv) != len(mesh.vertices):
+        return None
+    return uv[:, :2]
+
+
+def _mesh_vertex_colors(mesh):
+    visual = getattr(mesh, "visual", None)
+    colors = getattr(visual, "vertex_colors", None)
+    if colors is None or len(colors) != len(mesh.vertices):
+        raise ValueError("Textured mesh has neither UVs nor vertex colors.")
+    import numpy as np
+
+    return np.asarray(colors, dtype=np.float32)[:, :3]
+
+
+def _transfer_albedo_by_nearest_surface(target_vertices, source_mesh, source_uv, source_image):
+    import numpy as np
+    import trimesh
+
+    colors = np.empty((len(target_vertices), 3), dtype=np.float32)
+    faces = np.asarray(source_mesh.faces, dtype=np.int64)
+    source_vertices = np.asarray(source_mesh.vertices, dtype=np.float64)
+    chunk_size = 50000
+    max_distance = 0.0
+
+    for start in range(0, len(target_vertices), chunk_size):
+        end = min(start + chunk_size, len(target_vertices))
+        points = target_vertices[start:end]
+        closest, distances, face_ids = trimesh.proximity.closest_point(source_mesh, points)
+        face_ids = np.asarray(face_ids, dtype=np.int64)
+        valid = face_ids >= 0
+        chunk_colors = np.zeros((len(points), 3), dtype=np.float32)
+
+        if np.any(valid):
+            valid_faces = faces[face_ids[valid]]
+            triangles = source_vertices[valid_faces]
+            barycentric = trimesh.triangles.points_to_barycentric(triangles, closest[valid])
+            barycentric = np.nan_to_num(barycentric, nan=0.0, posinf=0.0, neginf=0.0)
+            barycentric = np.clip(barycentric, 0.0, 1.0)
+            totals = barycentric.sum(axis=1)
+            good_totals = totals > 1e-8
+            barycentric[good_totals] = barycentric[good_totals] / totals[good_totals, None]
+            barycentric[~good_totals] = np.array([1.0, 0.0, 0.0])
+            face_uv = source_uv[valid_faces]
+            sampled_uv = np.sum(face_uv * barycentric[:, :, None], axis=1)
+            chunk_colors[valid] = _sample_texture_rgb(source_image, sampled_uv)
+            if len(distances):
+                max_distance = max(max_distance, float(np.nanmax(distances[valid])))
+
+        if np.any(~valid):
+            fallback_colors, _ = _transfer_albedo_by_nearest_vertices(
+                points[~valid],
+                source_vertices,
+                _sample_texture_rgb(source_image, source_uv),
+            )
+            chunk_colors[~valid] = fallback_colors
+
+        colors[start:end] = chunk_colors
+
+    return colors, {
+        "method": "nearest_surface_uv",
+        "chunk_size": chunk_size,
+        "max_distance": round(max_distance, 6),
+    }
+
+
+def _transfer_albedo_by_nearest_faces_kdtree(target_vertices, source_mesh, source_uv, source_image):
+    import numpy as np
+    import trimesh
+    from scipy.spatial import cKDTree
+
+    faces = np.asarray(source_mesh.faces, dtype=np.int64)
+    source_vertices = np.asarray(source_mesh.vertices, dtype=np.float64)
+    if len(faces) == 0 or len(source_vertices) == 0:
+        raise ValueError("Textured mesh has no faces.")
+
+    triangles_all = source_vertices[faces]
+    centers = triangles_all.mean(axis=1)
+    tree = cKDTree(centers)
+    candidate_count = min(12, len(faces))
+    chunk_size = 30000
+    colors = np.empty((len(target_vertices), 3), dtype=np.float32)
+    max_distance = 0.0
+
+    for start in range(0, len(target_vertices), chunk_size):
+        end = min(start + chunk_size, len(target_vertices))
+        points = target_vertices[start:end]
+        try:
+            _, face_candidates = tree.query(points, k=candidate_count, workers=-1)
+        except TypeError:
+            _, face_candidates = tree.query(points, k=candidate_count)
+        face_candidates = np.asarray(face_candidates, dtype=np.int64)
+        if candidate_count == 1:
+            face_candidates = face_candidates.reshape(-1, 1)
+
+        best_distance2 = np.full((len(points),), np.inf, dtype=np.float64)
+        best_uv = np.zeros((len(points), 2), dtype=np.float64)
+
+        for candidate_index in range(candidate_count):
+            candidate_faces = face_candidates[:, candidate_index]
+            candidate_triangles = triangles_all[candidate_faces]
+            closest = trimesh.triangles.closest_point(candidate_triangles, points)
+            distance2 = np.sum((closest - points) ** 2, axis=1)
+            improved = distance2 < best_distance2
+            if not np.any(improved):
+                continue
+
+            barycentric = trimesh.triangles.points_to_barycentric(
+                candidate_triangles[improved],
+                closest[improved],
+            )
+            barycentric = np.nan_to_num(barycentric, nan=0.0, posinf=0.0, neginf=0.0)
+            barycentric = np.clip(barycentric, 0.0, 1.0)
+            totals = barycentric.sum(axis=1)
+            good_totals = totals > 1e-8
+            barycentric[good_totals] = barycentric[good_totals] / totals[good_totals, None]
+            barycentric[~good_totals] = np.array([1.0, 0.0, 0.0])
+
+            candidate_vertex_ids = faces[candidate_faces[improved]]
+            candidate_uv = source_uv[candidate_vertex_ids]
+            best_uv[improved] = np.sum(candidate_uv * barycentric[:, :, None], axis=1)
+            best_distance2[improved] = distance2[improved]
+
+        colors[start:end] = _sample_texture_rgb(source_image, best_uv)
+        finite_distances = best_distance2[np.isfinite(best_distance2)]
+        if len(finite_distances):
+            max_distance = max(max_distance, float(np.sqrt(np.max(finite_distances))))
+
+    return colors, {
+        "method": "nearest_face_uv_kdtree",
+        "candidate_faces": int(candidate_count),
+        "chunk_size": int(chunk_size),
+        "max_distance": round(max_distance, 6),
+    }
+
+
+def _transfer_albedo_by_nearest_vertices(target_vertices, source_vertices, source_colors):
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    source_count = int(len(source_vertices))
+    if source_count == 0:
+        raise ValueError("Textured mesh has no vertices.")
+    k = min(4, source_count)
+    tree = cKDTree(source_vertices)
+    try:
+        distances, indices = tree.query(target_vertices, k=k, workers=-1)
+    except TypeError:
+        distances, indices = tree.query(target_vertices, k=k)
+
+    if k == 1:
+        colors = np.asarray(source_colors, dtype=np.float32)[indices]
+        max_distance = float(np.nanmax(distances)) if len(target_vertices) else 0.0
+        return colors, {"method": "nearest_vertex", "neighbors": 1, "max_distance": round(max_distance, 6)}
+
+    distances = np.asarray(distances, dtype=np.float64)
+    indices = np.asarray(indices, dtype=np.int64)
+    weights = 1.0 / np.maximum(distances, 1e-8)
+    weights[~np.isfinite(weights)] = 0.0
+    totals = weights.sum(axis=1)
+    totals[totals <= 1e-8] = 1.0
+    sampled = np.asarray(source_colors, dtype=np.float32)[indices]
+    colors = np.sum(sampled * weights[:, :, None], axis=1) / totals[:, None]
+    max_distance = float(np.nanmax(distances[:, 0])) if len(target_vertices) else 0.0
+    return colors, {"method": "nearest_vertex", "neighbors": k, "max_distance": round(max_distance, 6)}
+
+
+def _sample_texture_rgb(image_array, uv):
+    import numpy as np
+
+    if uv is None or len(uv) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    height, width = image_array.shape[:2]
+    coords = np.asarray(uv, dtype=np.float64)
+    coords = np.nan_to_num(coords, nan=0.0, posinf=1.0, neginf=0.0)
+    u = np.clip(coords[:, 0], 0.0, 1.0)
+    v = np.clip(coords[:, 1], 0.0, 1.0)
+    x = u * max(width - 1, 0)
+    y = (1.0 - v) * max(height - 1, 0)
+
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    x1 = np.clip(x0 + 1, 0, max(width - 1, 0))
+    y1 = np.clip(y0 + 1, 0, max(height - 1, 0))
+    wx = (x - x0)[:, None]
+    wy = (y - y0)[:, None]
+
+    top = image_array[y0, x0] * (1.0 - wx) + image_array[y0, x1] * wx
+    bottom = image_array[y1, x0] * (1.0 - wx) + image_array[y1, x1] * wx
+    return (top * (1.0 - wy) + bottom * wy).astype(np.float32)
 
 
 def _stabilize_pbr_textures(textures: dict[str, str], config: dict[str, Any]) -> dict[str, Any]:
