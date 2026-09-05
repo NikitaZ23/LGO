@@ -1655,6 +1655,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         _patch_snapshot_download(paint_root)
         _patch_texture_remesh_target(texture_pipeline_module, config)
         six_views = isinstance(images, dict) and "top" in images and "bottom" in images
+        multiple_references = isinstance(images, dict) and len(images) > 1
         texture_views = int(config["generation"].get("texture_views", 6))
         conf = Hunyuan3DPaintConfig(
             max_num_view=max(6, texture_views) if six_views else texture_views,
@@ -1666,7 +1667,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         conf.custom_pipeline = str(source_dir / "hy3dpaint" / "hunyuanpaintpbr")
         paint_pipeline = Hunyuan3DPaintPipeline(conf)
         texture_prompt, texture_prompt_report = _prepare_texture_prompt_image(images, config, output_dir)
-        if six_views:
+        if multiple_references:
             references, reference_reports = _prepare_texture_references(images, config, output_dir)
             diffusion_model = paint_pipeline.models["multiview_model"]
             reference_pipeline = _TextureReferencePipeline(diffusion_model.pipeline, references)
@@ -1683,9 +1684,9 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             output_mesh_path=str(textured_obj),
             save_glb=False,
         )
-        if six_views:
+        if multiple_references:
             if not reference_pipeline.calls:
-                raise RuntimeError("Paint did not consume the six texture references.")
+                raise RuntimeError("Paint did not consume the supplied texture references.")
             texture_prompt_report["reference_count"] = len(references)
         textures = {
             "albedo": str(textured_obj).replace(".obj", ".jpg"),
@@ -2296,9 +2297,9 @@ class _TextureReferencePipeline:
 
     def __init__(self, pipeline, references: dict[str, Image.Image]):
         if not getattr(pipeline.unet, "use_ra", False):
-            raise RuntimeError("Six-view texturing requires Paint reference attention (use_ra).")
-        if tuple(references) != TEXTURE_VIEW_ORDER:
-            raise ValueError("Six-view texturing requires front, back, left, right, top and bottom references.")
+            raise RuntimeError("Multiview texturing requires Paint reference attention (use_ra).")
+        if not references or any(view not in TEXTURE_VIEW_ORDER for view in references):
+            raise ValueError("Texture references must use front, back, left, right, top or bottom view names.")
         self.pipeline = pipeline
         self.references = references
         self.calls = 0
@@ -2323,6 +2324,8 @@ def _prepare_texture_references(images, config: dict[str, Any], output_dir: Path
     references = {}
     reports = {}
     for view in TEXTURE_VIEW_ORDER:
+        if view not in images:
+            continue
         references[view], reports[view] = _prepare_texture_prompt_image(
             images[view], config, output_dir, filename=f"texture_prompt_{view}.png",
         )

@@ -45,7 +45,7 @@ class GenerationService:
             "texture_reference_views": (
                 ["front", "back", "left", "right", "top", "bottom"]
                 if job["payload"]["mode"] == "sixview"
-                else ["single"] if job["payload"]["mode"] == "single" else ["front"]
+                else ["single"] if job["payload"]["mode"] == "single" else ["front", "back", "left", "right"]
             ),
             "models": self._models_for(job["payload"]["mode"], job["payload"]["texture"]),
             "paths": {

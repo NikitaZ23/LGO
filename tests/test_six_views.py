@@ -100,9 +100,9 @@ class SixViewTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "reference attention"):
             runner._TextureReferencePipeline(SimpleNamespace(unet=SimpleNamespace(use_ra=False)), self.images)
 
-    def test_texture_pass_connects_reference_adapter_only_for_six_views(self):
-        for six_views in (False, True):
-            with self.subTest(six_views=six_views), ExitStack() as stack:
+    def test_texture_pass_uses_all_references_for_single_four_and_six_views(self):
+        for reference_count in (1, 4, 6):
+            with self.subTest(reference_count=reference_count), ExitStack() as stack:
                 raw_pipeline = Mock()
                 raw_pipeline.unet = SimpleNamespace(use_ra=True)
                 raw_pipeline.view_size = 512
@@ -136,15 +136,19 @@ class SixViewTests(unittest.TestCase):
                 config = {"generation": {"texture_views": 4, "texture_resolution": 384},
                           "paths": {"hunyuan_source_dir": str(self.root)},
                           "models": {"paint_root": str(self.root), "realesrgan": "upscale"}}
-                images = self.images if six_views else {view: self.images[view] for view in runner.VIEW_ORDER}
+                views = runner.TEXTURE_VIEW_ORDER[:reference_count]
+                images = self.images["front"] if reference_count == 1 else {view: self.images[view] for view in views}
                 output, warning, report = runner._try_texture(config, self.root, Mock(), images)
                 self.assertIsNone(warning)
                 self.assertEqual(output, self.root / "textured_mesh.glb")
-                self.assertEqual(len(raw_pipeline.call_args.args[0]), 6 if six_views else 1)
-                self.assertEqual(configs[0].max_selected_view_num, 6 if six_views else 4)
+                supplied = raw_pipeline.call_args.args[0]
+                self.assertEqual(len(supplied), reference_count)
+                self.assertEqual([image.getpixel((0, 0))[:3] for image in supplied],
+                                 [self.images[view].getpixel((0, 0))[:3] for view in views])
+                self.assertEqual(configs[0].max_selected_view_num, 6 if reference_count == 6 else 4)
                 self.assertEqual(configs[0].resolution, 384)
-                if six_views:
-                    self.assertEqual(report["texture_prompt"]["reference_count"], 6)
+                if reference_count > 1:
+                    self.assertEqual(report["texture_prompt"]["reference_count"], reference_count)
 
     def test_texture_prompt_adjustments_apply_to_every_reference(self):
         config = {"postprocess": {"texture_prompt": {"enabled": True, "brightness": 0.5}}}
@@ -167,6 +171,23 @@ class SixViewTests(unittest.TestCase):
         self.assertEqual(tuple(manifest["shape_input_views"]), runner.VIEW_ORDER)
         self.assertEqual(tuple(manifest["texture_reference_views"]), runner.TEXTURE_VIEW_ORDER)
         self.assertIn("6 views", store.display_name(job))
+
+        four_view_payload = self.save_inputs("multiview")
+        four_view_payload.update(texture=True, formats=["glb"])
+        four_view_job = store.create(four_view_payload)
+        four_view_manifest = GenerationService(config).prepare(four_view_job)
+        self.assertEqual(tuple(four_view_manifest["texture_reference_views"]), runner.VIEW_ORDER)
+
+    def test_four_saved_views_are_reused_as_texture_references(self):
+        payload = self.save_inputs("multiview")
+        cleaned_back = self.root / "back-cleaned.png"
+        Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(cleaned_back)
+        job = {"payload": payload, "preprocessing": {"saved": {"back": str(cleaned_back)}}}
+        images = runner._load_existing_images_for_texture(job)
+        references, _ = runner._prepare_texture_references(images, {}, self.root)
+        self.assertEqual(tuple(references), runner.VIEW_ORDER)
+        self.assertEqual(references["back"].getpixel((0, 0)), (1, 2, 3, 255))
+        self.assertEqual(references["right"].getpixel((0, 0)), self.images["right"].getpixel((0, 0)))
 
 
 if __name__ == "__main__":
