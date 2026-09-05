@@ -19,6 +19,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageStat
 
 
 VIEW_ORDER = ("front", "back", "left", "right")
+TEXTURE_VIEW_ORDER = (*VIEW_ORDER, "top", "bottom")
 
 
 def main() -> None:
@@ -75,6 +76,8 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
     )
     images, preprocessing = _load_images(payload, config, job_path)
     warnings.extend(preprocessing.get("warnings", []))
+    if payload["mode"] == "sixview":
+        _append_log("6-view input: front/back/left/right for shape; all six images are texture references.")
 
     _update_job(job_path, "loading_shape_model", "Loading Hunyuan3D shape model.")
     pipeline = _load_shape_pipeline(config, payload["mode"])
@@ -656,8 +659,9 @@ def _load_shape_pipeline(config: dict[str, Any], mode: str):
 
     _install_hunyuan_shape_aliases()
 
-    model_subfolder = "Hunyuan3D-DiT-v2-mv" if mode == "multiview" else "Hunyuan3D-DiT-v2-1"
-    use_safetensors = mode == "multiview"
+    is_multiview = mode in {"multiview", "sixview"}
+    model_subfolder = "Hunyuan3D-DiT-v2-mv" if is_multiview else "Hunyuan3D-DiT-v2-1"
+    use_safetensors = is_multiview
     pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
         ".",
         subfolder=model_subfolder,
@@ -686,11 +690,12 @@ def _load_images(payload: dict[str, Any], config: dict[str, Any], job_path: Path
         "warnings": [],
     }
 
-    if payload["mode"] == "multiview":
+    if payload["mode"] in {"multiview", "sixview"}:
+        views = TEXTURE_VIEW_ORDER if payload["mode"] == "sixview" else VIEW_ORDER
         images: dict[str, Image.Image] = {
             view: Image.open(payload["input_files"][view]).convert("RGBA")
-            for view in VIEW_ORDER
-            if view in payload["input_files"]
+            for view in views
+            if payload["mode"] == "sixview" or view in payload["input_files"]
         }
         if remove_background:
             try:
@@ -847,8 +852,10 @@ def _keep_largest_alpha_component(alpha_image: Image.Image) -> Image.Image:
 
 def _generate_shape(pipeline, images, config: dict[str, Any], generator):
     generation = config["generation"]
+    # The shape checkpoint has camera embeddings only for these four views.
+    shape_images = {view: images[view] for view in VIEW_ORDER if view in images} if isinstance(images, dict) else images
     outputs = pipeline(
-        image=images,
+        image=shape_images,
         num_inference_steps=int(generation.get("num_inference_steps", 50)),
         guidance_scale=float(generation.get("guidance_scale", 5.0)),
         generator=generator,
@@ -1647,8 +1654,10 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
 
         _patch_snapshot_download(paint_root)
         _patch_texture_remesh_target(texture_pipeline_module, config)
+        six_views = isinstance(images, dict) and "top" in images and "bottom" in images
+        texture_views = int(config["generation"].get("texture_views", 6))
         conf = Hunyuan3DPaintConfig(
-            max_num_view=int(config["generation"].get("texture_views", 6)),
+            max_num_view=max(6, texture_views) if six_views else texture_views,
             resolution=int(config["generation"].get("texture_resolution", 512)),
         )
         conf.multiview_pretrained_path = str(paint_root)
@@ -1657,12 +1666,27 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         conf.custom_pipeline = str(source_dir / "hy3dpaint" / "hunyuanpaintpbr")
         paint_pipeline = Hunyuan3DPaintPipeline(conf)
         texture_prompt, texture_prompt_report = _prepare_texture_prompt_image(images, config, output_dir)
+        if six_views:
+            references, reference_reports = _prepare_texture_references(images, config, output_dir)
+            diffusion_model = paint_pipeline.models["multiview_model"]
+            reference_pipeline = _TextureReferencePipeline(diffusion_model.pipeline, references)
+            diffusion_model.pipeline = reference_pipeline
+            texture_prompt_report["references"] = reference_reports
+            texture_prompt_report["render_views"] = conf.max_selected_view_num
+            _append_log(
+                f"Texture references: {', '.join(references)}. "
+                f"Render views: {conf.max_selected_view_num}; resolution: {conf.resolution}."
+            )
         paint_pipeline(
             mesh_path=str(white_obj),
             image_path=texture_prompt,
             output_mesh_path=str(textured_obj),
             save_glb=False,
         )
+        if six_views:
+            if not reference_pipeline.calls:
+                raise RuntimeError("Paint did not consume the six texture references.")
+            texture_prompt_report["reference_count"] = len(references)
         textures = {
             "albedo": str(textured_obj).replace(".obj", ".jpg"),
             "metallic": str(textured_obj).replace(".obj", "_metallic.jpg"),
@@ -2267,7 +2291,47 @@ def _stabilize_pbr_textures(textures: dict[str, str], config: dict[str, Any]) ->
     return report
 
 
-def _prepare_texture_prompt_image(images, config: dict[str, Any], output_dir: Path) -> tuple[Image.Image, dict[str, Any]]:
+class _TextureReferencePipeline:
+    """Inject references after the vendor wrapper's input_images[0:1] slice."""
+
+    def __init__(self, pipeline, references: dict[str, Image.Image]):
+        if not getattr(pipeline.unet, "use_ra", False):
+            raise RuntimeError("Six-view texturing requires Paint reference attention (use_ra).")
+        if tuple(references) != TEXTURE_VIEW_ORDER:
+            raise ValueError("Six-view texturing requires front, back, left, right, top and bottom references.")
+        self.pipeline = pipeline
+        self.references = references
+        self.calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self.pipeline, name)
+
+    def __call__(self, images=None, *args, **kwargs):
+        size = (int(kwargs.get("width", self.pipeline.view_size)), int(kwargs.get("height", self.pipeline.view_size)))
+        prepared = []
+        for reference in self.references.values():
+            rgba = reference.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
+            rgb = Image.new("RGB", size, (255, 255, 255))
+            rgb.paste(rgba.convert("RGB"), mask=rgba.getchannel("A"))
+            prepared.append(rgb)
+        result = self.pipeline(prepared, *args, **kwargs)
+        self.calls += 1
+        return result
+
+
+def _prepare_texture_references(images, config: dict[str, Any], output_dir: Path):
+    references = {}
+    reports = {}
+    for view in TEXTURE_VIEW_ORDER:
+        references[view], reports[view] = _prepare_texture_prompt_image(
+            images[view], config, output_dir, filename=f"texture_prompt_{view}.png",
+        )
+    return references, reports
+
+
+def _prepare_texture_prompt_image(
+    images, config: dict[str, Any], output_dir: Path, *, filename: str = "texture_prompt.png",
+) -> tuple[Image.Image, dict[str, Any]]:
     settings = config.get("postprocess", {}).get("texture_prompt", {})
     source = _primary_image(images).convert("RGBA")
     report: dict[str, Any] = {
@@ -2311,7 +2375,7 @@ def _prepare_texture_prompt_image(images, config: dict[str, Any], output_dir: Pa
         }
     )
     if bool(settings.get("save", True)):
-        target = output_dir / "texture_prompt.png"
+        target = output_dir / filename
         image.save(target)
         report["path"] = str(target)
     return image, report
@@ -2944,11 +3008,12 @@ def _load_existing_images_for_texture(job: dict[str, Any]):
     preprocessing_saved = job.get("preprocessing", {}).get("saved", {})
     payload = job["payload"]
     input_files = payload.get("input_files", {})
-    if payload.get("mode") == "multiview":
+    if payload.get("mode") in {"multiview", "sixview"}:
+        views = TEXTURE_VIEW_ORDER if payload["mode"] == "sixview" else VIEW_ORDER
         return {
             view: Image.open(preprocessing_saved.get(view) or input_files[view]).convert("RGBA")
-            for view in VIEW_ORDER
-            if view in input_files
+            for view in views
+            if payload["mode"] == "sixview" or view in input_files
         }
     return Image.open(preprocessing_saved.get("single") or input_files["single"]).convert("RGBA")
 

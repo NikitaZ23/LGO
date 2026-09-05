@@ -41,6 +41,12 @@ class GenerationService:
             "texture": job["payload"]["texture"],
             "formats": job["payload"]["formats"],
             "input_files": job["payload"]["input_files"],
+            "shape_input_views": ["single"] if job["payload"]["mode"] == "single" else ["front", "back", "left", "right"],
+            "texture_reference_views": (
+                ["front", "back", "left", "right", "top", "bottom"]
+                if job["payload"]["mode"] == "sixview"
+                else ["single"] if job["payload"]["mode"] == "single" else ["front"]
+            ),
             "models": self._models_for(job["payload"]["mode"], job["payload"]["texture"]),
             "paths": {
                 "blender": self.config["paths"]["blender"],

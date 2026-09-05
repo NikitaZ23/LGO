@@ -208,6 +208,10 @@ button:disabled {
   color: var(--text);
 }
 
+.mode-toggle {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -284,6 +288,11 @@ button:disabled {
 
 #multiFields .preview-drop.has-preview .drop-title {
   display: inline-block;
+}
+
+[data-six-view] .drop-title {
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .preview-image {

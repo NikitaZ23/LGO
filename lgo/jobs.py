@@ -302,7 +302,7 @@ class JobStore:
     def display_name(self, job: dict[str, Any]) -> str:
         created_at = str(job.get("created_at", "")).replace("T", " ")
         payload = job.get("payload", {})
-        mode = "4 views" if payload.get("mode") == "multiview" else "1 image"
+        mode = {"multiview": "4 views", "sixview": "6 views"}.get(payload.get("mode"), "1 image")
         if created_at:
             return f"Object {created_at} - {mode}"
         return f"Object {job.get('id', 'Generation')} - {mode}"

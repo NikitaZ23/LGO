@@ -150,6 +150,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
         )
 
         mode = _field(form, "mode", "single")
+        if mode not in {"single", "multiview", "sixview"}:
+            return self._json({"error": "Unsupported generation mode."}, HTTPStatus.BAD_REQUEST)
         quality = _quality_field(form)
         object_type = _object_type_field(form)
         scale_preset = _scale_preset_field(form)
@@ -340,7 +342,11 @@ class LGOHandler(SimpleHTTPRequestHandler):
 
     def _save_inputs(self, form: cgi.FieldStorage, job: dict[str, Any], payload: dict[str, Any]) -> None:
         mode = payload["mode"]
-        fields = ["single"] if mode == "single" else ["front", "back", "left", "right"]
+        fields = {
+            "single": ("single",),
+            "multiview": ("front", "back", "left", "right"),
+            "sixview": ("front", "back", "left", "right", "top", "bottom"),
+        }[mode]
         input_dir = Path(job["input_dir"])
 
         for field in fields:
@@ -348,6 +354,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
             if item is None or not getattr(item, "filename", ""):
                 raise ValueError(f"Missing required image field: {field}")
 
+        for field in fields:
+            item = form[field]
             filename = Path(item.filename).name
             suffix = Path(filename).suffix.lower() or ".png"
             target = input_dir / f"{field}{suffix}"

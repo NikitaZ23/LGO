@@ -9,7 +9,7 @@
     <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
     <link rel="shortcut icon" href="/favicon.ico?v=4">
-    <link rel="stylesheet" href="/styles.css?v=22">
+    <link rel="stylesheet" href="/styles.css?v=23">
     <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
   </head>
   <body>
@@ -33,9 +33,10 @@
           <form id="jobForm" class="panel input-panel">
             <div class="section-title">
               <h2>Input</h2>
-              <div class="segmented" role="tablist" aria-label="Generation mode">
+              <div class="segmented mode-toggle" role="tablist" aria-label="Generation mode">
                 <button class="active" type="button" data-mode="single">1 image</button>
                 <button type="button" data-mode="multiview">4 views</button>
+                <button type="button" data-mode="sixview">6 views</button>
               </div>
             </div>
 
@@ -113,6 +114,34 @@
                     <input type="file" name="right" accept="image/*" data-preview-target="right">
                   </label>
                   <span class="file-name" data-file-name="right">No file selected</span>
+                </div>
+              </div>
+              <div class="upload-field hidden" data-six-view>
+                <div class="drop preview-drop" data-preview-box="top">
+                  <span class="drop-title">Top / сверху (текстура)</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="top" alt="Top view texture reference">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="top" accept="image/*" data-preview-target="top" aria-label="Top / сверху">
+                  </label>
+                  <span class="file-name" data-file-name="top">No file selected</span>
+                </div>
+              </div>
+              <div class="upload-field hidden" data-six-view>
+                <div class="drop preview-drop" data-preview-box="bottom">
+                  <span class="drop-title">Bottom / снизу (текстура)</span>
+                  <span class="drop-placeholder">No image selected.</span>
+                  <img class="preview-image hidden" data-preview-image="bottom" alt="Bottom view texture reference">
+                </div>
+                <div class="file-row">
+                  <label class="file-picker">
+                    <span>Choose file</span>
+                    <input type="file" name="bottom" accept="image/*" data-preview-target="bottom" aria-label="Bottom / снизу">
+                  </label>
+                  <span class="file-name" data-file-name="bottom">No file selected</span>
                 </div>
               </div>
             </div>
@@ -287,6 +316,6 @@
         </section>
       </section>
     </main>
-  <script src="/app.js?v=34"></script>
+    <script src="/app.js?v=35"></script>
 </body>
 </html>

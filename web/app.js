@@ -21,6 +21,12 @@ const singleFields = document.querySelector("#singleFields");
 const multiFields = document.querySelector("#multiFields");
 const jobStatus = document.querySelector("#jobStatus");
 const modeButtons = document.querySelectorAll("[data-mode]");
+const inputViewsByMode = {
+  single: ["single"],
+  multiview: ["front", "back", "left", "right"],
+  sixview: ["front", "back", "left", "right", "top", "bottom"],
+};
+const modeLabels = { single: "1 image", multiview: "4 views", sixview: "6 views" };
 const qualityButtons = document.querySelectorAll("[data-quality]");
 const objectTypeButtons = document.querySelectorAll("[data-object-type]");
 const scalePresetButtons = document.querySelectorAll("[data-scale-preset]");
@@ -152,13 +158,22 @@ async function loadHealth() {
 }
 
 function setMode(mode) {
+  if (!Object.hasOwn(inputViewsByMode, mode)) {
+    mode = "single";
+  }
   modeInput.value = mode;
   localStorage.setItem("lgo.mode", mode);
   modeButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);
   });
   singleFields.classList.toggle("hidden", mode !== "single");
-  multiFields.classList.toggle("hidden", mode !== "multiview");
+  multiFields.classList.toggle("hidden", mode === "single");
+  document.querySelectorAll("[data-six-view]").forEach((field) => {
+    field.classList.toggle("hidden", mode !== "sixview");
+  });
+  fileInputs.forEach((input) => {
+    input.disabled = !inputViewsByMode[mode].includes(input.dataset.previewTarget);
+  });
 }
 
 modeButtons.forEach((button) => {
@@ -372,6 +387,14 @@ if (rebakeTextureButton) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const missingViews = inputViewsByMode[modeInput.value].filter((view) => {
+    const input = document.querySelector(`[data-preview-target="${view}"]`);
+    return !input?.files?.[0] && !persistedFiles.has(view);
+  });
+  if (missingViews.length) {
+    setProgress("failed", `Missing images: ${missingViews.join(", ")}.`);
+    return;
+  }
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -781,7 +804,7 @@ function jobWithTextureVersion(job, version) {
 }
 
 function historyMeta(job) {
-  const mode = job.mode === "multiview" ? "4 views" : "1 image";
+  const mode = modeLabels[job.mode] || "1 image";
   const texture = job.texture ? "texture" : "no texture";
   const quality = job.quality || "default";
   const objectType = objectTypeLabel(job.object_type);
@@ -1357,7 +1380,7 @@ function appendPersistedFiles(data) {
   const mode = modeInput.value;
   fileInputs.forEach((input) => {
     const target = input.dataset.previewTarget;
-    const isActive = mode === "single" ? target === "single" : target !== "single";
+    const isActive = inputViewsByMode[mode].includes(target);
     data.delete(input.name);
     if (!isActive) {
       return;
@@ -1883,9 +1906,7 @@ function restoreLastJob() {
 function restoreFormState() {
   const storedScalePreset = localStorage.getItem("lgo.scalePreset");
   const storedMode = localStorage.getItem("lgo.mode");
-  if (storedMode === "single" || storedMode === "multiview") {
-    setMode(storedMode);
-  }
+  setMode(storedMode || "single");
 
   const storedQuality = localStorage.getItem("lgo.quality");
   if (storedQuality === "fast" || storedQuality === "balanced" || storedQuality === "high") {
