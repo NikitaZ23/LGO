@@ -11,6 +11,8 @@ const objectTypeInput = document.querySelector("#objectType");
 const scalePresetInput = document.querySelector("#scalePreset");
 const targetHeightInput = document.querySelector("#targetHeight");
 const targetHeightValueInput = document.querySelector("#targetHeightValue");
+const targetLengthInput = document.querySelector("#targetLength");
+const targetLengthValueInput = document.querySelector("#targetLengthValue");
 const textureInput = document.querySelector("#texture");
 const textureQualityInput = document.querySelector("#textureQuality");
 const rebakeAlbedoInput = document.querySelector("#rebakeAlbedo");
@@ -275,6 +277,37 @@ function setTexture(enabled) {
   });
 }
 
+function targetLengthNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  const parsed = Number(String(value).replace(",", "."));
+  return Number.isFinite(parsed) && parsed >= 0.01 && parsed <= 10000
+    ? Math.round(parsed * 1000) / 1000
+    : null;
+}
+
+function setTargetLengthValue(value, options = {}) {
+  const length = targetLengthNumber(value);
+  const text = length === null ? "" : length.toString();
+  targetLengthInput.value = text;
+  if (options.normalizeVisible !== false) {
+    targetLengthValueInput.value = text;
+  }
+  localStorage.setItem("lgo.targetLength", text);
+}
+
+function syncTargetLength(options = {}) {
+  if (!targetLengthValueInput.validity.valid) {
+    return false;
+  }
+  setTargetLengthValue(targetLengthValueInput.value, options);
+  return true;
+}
+
+targetLengthValueInput.addEventListener("input", () => syncTargetLength({ normalizeVisible: false }));
+targetLengthValueInput.addEventListener("change", () => syncTargetLength());
+
 textureButtons.forEach((button) => {
   button.addEventListener("click", () => setTexture(button.dataset.texture));
 });
@@ -387,6 +420,10 @@ if (rebakeTextureButton) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!syncTargetLength()) {
+    targetLengthValueInput.reportValidity();
+    return;
+  }
   const missingViews = inputViewsByMode[modeInput.value].filter((view) => {
     const input = document.querySelector(`[data-preview-target="${view}"]`);
     return !input?.files?.[0] && !persistedFiles.has(view);
@@ -443,6 +480,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 function renderJob(job, options = {}) {
+  const restoreLength = job.id !== currentJob?.id || (options.textureVersionId || "") !== currentTextureVersionId;
   currentJobId = job.id || currentJobId;
   currentJob = job;
   currentTextureVersionId = options.textureVersionId || "";
@@ -456,14 +494,18 @@ function renderJob(job, options = {}) {
   ];
 
   if (job.payload) {
+    const length = Object.hasOwn(job.payload, "target_length_m") ? job.payload.target_length_m : job.scale?.target_length_m;
     lines.push(`Quality: ${job.payload.quality || "default"}`);
     lines.push(`Object type: ${objectTypeLabel(job.payload.object_type || job.object_type?.selected)}`);
     if (job.payload.scale_preset || job.scale) {
-      lines.push(`Scale: ${scaleMeta(job.payload.scale_preset || job.scale?.selected, job.payload.target_height_m || job.scale?.target_height_m)}`);
+      lines.push(`Scale: ${scaleMeta(job.payload.scale_preset || job.scale?.selected, job.payload.target_height_m || job.scale?.target_height_m, length)}`);
       setScalePreset(job.payload.scale_preset || job.scale?.selected, { markTouched: false });
       if (job.payload.target_height_m || job.scale?.target_height_m) {
         setTargetHeightValue(job.payload.target_height_m || job.scale?.target_height_m);
       }
+    }
+    if (restoreLength) {
+      setTargetLengthValue(length);
     }
     lines.push(`Texture: ${job.payload.texture ? "PBR texture" : "No texture"}`);
     lines.push(`Texture speed: ${textureQualityLabel(job.payload.texture_quality || job.texture_quality?.selected)}`);
@@ -791,6 +833,7 @@ function jobWithTextureVersion(job, version) {
     object_type: version.object_type || clone.payload?.object_type,
     scale_preset: version.scale_preset || clone.payload?.scale_preset,
     target_height_m: version.target_height_m ?? clone.payload?.target_height_m,
+    target_length_m: version.target_length_m !== undefined ? version.target_length_m : clone.payload?.target_length_m,
     rebake_albedo: version.rebake_albedo ?? clone.payload?.rebake_albedo,
     texture_color: version.texture_color ?? clone.payload?.texture_color,
   };
@@ -798,6 +841,7 @@ function jobWithTextureVersion(job, version) {
   clone.object_type = version.object_type || clone.object_type;
   clone.scale_preset = version.scale_preset || clone.scale_preset;
   clone.target_height_m = version.target_height_m ?? clone.target_height_m;
+  clone.target_length_m = version.target_length_m !== undefined ? version.target_length_m : clone.target_length_m;
   clone.rebake_albedo = version.rebake_albedo ?? clone.rebake_albedo;
   clone.texture_color = version.texture_color ?? clone.texture_color;
   return clone;
@@ -808,7 +852,7 @@ function historyMeta(job) {
   const texture = job.texture ? "texture" : "no texture";
   const quality = job.quality || "default";
   const objectType = objectTypeLabel(job.object_type);
-  const scale = job.target_height_m ? scaleMeta(job.scale_preset, job.target_height_m) : "";
+  const scale = job.target_height_m ? scaleMeta(job.scale_preset, job.target_height_m, job.target_length_m) : "";
   const textureQuality = `${textureQualityLabel(job.texture_quality)} tex`;
   const albedo = albedoMeta(job.rebake_albedo);
   const color = textureColorMeta(job.texture_color);
@@ -852,7 +896,8 @@ function textureHistoryMeta(job, version) {
   const source = job.display_name || job.id;
   const objectType = objectTypeLabel(version.object_type || job.object_type);
   const scale = (version.target_height_m ?? job.target_height_m)
-    ? scaleMeta(version.scale_preset || job.scale_preset, version.target_height_m ?? job.target_height_m)
+    ? scaleMeta(version.scale_preset || job.scale_preset, version.target_height_m ?? job.target_height_m,
+      version.target_length_m !== undefined ? version.target_length_m : job.target_length_m)
     : "";
   const textureQuality = `${textureQualityLabel(version.texture_quality || job.texture_quality)} tex`;
   const albedo = albedoMeta(version.rebake_albedo);
@@ -1819,12 +1864,16 @@ function scalePresetLabel(value) {
   return labels[selected] || "";
 }
 
-function scaleMeta(value, height) {
+function scaleMeta(value, height, length) {
   const selected = typeof value === "string" ? value : value?.selected || value?.scale_preset;
   const label = scalePresetLabel(selected);
   const sourceHeight = height ?? (typeof value === "object" ? value?.target_height_m : null);
   const formattedHeight = formatTargetHeight(sourceHeight);
-  return [label, formattedHeight].filter(Boolean).join(" ");
+  const sourceLength = length !== undefined ? length : (typeof value === "object" ? value?.target_length_m : null);
+  const lengthNumber = targetLengthNumber(sourceLength);
+  return lengthNumber === null
+    ? [label, formattedHeight].filter(Boolean).join(" ")
+    : [label, `H ${formattedHeight}`, `L ${lengthNumber}m`].join(" ");
 }
 
 function normalizeScalePreset(value) {
@@ -1904,6 +1953,7 @@ function restoreLastJob() {
 }
 
 function restoreFormState() {
+  setTargetLengthValue(localStorage.getItem("lgo.targetLength"));
   const storedScalePreset = localStorage.getItem("lgo.scalePreset");
   const storedMode = localStorage.getItem("lgo.mode");
   setMode(storedMode || "single");

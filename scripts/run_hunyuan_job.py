@@ -4,6 +4,7 @@ import argparse
 import copy
 import importlib.util
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -68,7 +69,8 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
         (
             "Cleaning input background and shadows. "
             f"Quality: {quality['label']}. Object type: {object_type['label']}. "
-            f"Scale: {scale['label']} {scale['target_height_m']}m."
+            f"Scale: {scale['label']} {scale['target_height_m']}m. "
+            f"Length: {str(scale['target_length_m']) + 'm' if scale['target_length_m'] is not None else 'Auto'}."
         ),
         quality=quality,
         object_type=object_type,
@@ -489,15 +491,19 @@ def _resolve_scale_settings(config: dict[str, Any], payload: dict[str, Any]) -> 
     else:
         target_height = _target_height_value(default_height, default_height)
     vertical_axis = _scale_axis_value(preset.get("vertical_axis", "y"))
+    target_length = _target_length_value(payload.get("target_length_m"))
 
     payload["scale_preset"] = selected
     payload["target_height_m"] = target_height
+    payload["target_length_m"] = target_length
 
     return {
         "selected": selected,
         "label": preset.get("label", selected.replace("_", " ").title()),
         "target_height_m": target_height,
         "vertical_axis": vertical_axis,
+        "target_length_m": target_length,
+        "length_axis": "x" if vertical_axis == "z" else "z",
     }
 
 
@@ -524,6 +530,18 @@ def _target_height_value(value: Any, default_height: Any = 1.8) -> float:
     except (TypeError, ValueError):
         parsed = float(default_height or 1.8)
     return round(max(0.01, min(10000.0, parsed)), 3)
+
+
+def _target_length_value(value: Any) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        raise ValueError("Length must be a number between 0.01 and 10000 metres, or empty for Auto.") from None
+    if not math.isfinite(parsed) or not 0.01 <= parsed <= 10000.0:
+        raise ValueError("Length must be between 0.01 and 10000 metres.")
+    return round(parsed, 3)
 
 
 def _scale_axis_value(value: Any) -> str:
@@ -559,14 +577,30 @@ def _apply_mesh_scale(mesh, scale: dict[str, Any]):
         }
 
     factor = target_height / current_height
+    factors = np.full(3, factor, dtype=float)
+    length_axis = _scale_axis_value(scale.get("length_axis", "x" if axis == "z" else "z"))
+    length_axis_index = _scale_axis_index(length_axis)
+    current_length = float(bounds[1][length_axis_index] - bounds[0][length_axis_index])
+    target_length = _target_length_value(scale.get("target_length_m"))
+    if target_length is not None:
+        if length_axis_index == axis_index:
+            raise ValueError("Height and Length must use different axes.")
+        if not math.isfinite(current_length) or current_length <= 1e-9:
+            raise ValueError(f"Cannot set Length: mesh has no extent along the {length_axis.upper()} axis.")
+        factors[length_axis_index] = target_length / current_length
     working = mesh.copy()
-    working.apply_scale(factor)
+    working.apply_scale(factors if target_length is not None else factor)
     return working, {
         "applied": True,
         "axis": axis,
         "current_height_m": round(current_height, 6),
         "target_height_m": target_height,
         "scale_factor": round(float(factor), 8),
+        "axis_scale_factors": [round(float(value), 8) for value in factors],
+        "length_axis": length_axis,
+        "current_length_m": round(current_length, 6),
+        "target_length_m": target_length,
+        "final_length_m": round(current_length * float(factors[length_axis_index]), 6),
     }
 
 
@@ -2924,6 +2958,7 @@ def _snapshot_texture_version(
         "object_type": _preset_selected(object_type) or payload.get("object_type"),
         "scale_preset": payload.get("scale_preset"),
         "target_height_m": payload.get("target_height_m"),
+        "target_length_m": payload.get("target_length_m"),
         "rebake_albedo": payload.get("rebake_albedo"),
         "texture_color": payload.get("texture_color"),
         "outputs": outputs,

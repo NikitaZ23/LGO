@@ -33,6 +33,7 @@ class GenerationService:
                 "target_height_m",
                 self.config.get("generation", {}).get("default_target_height_m", 1.8),
             ),
+            "target_length_m": job["payload"].get("target_length_m"),
             "texture_quality": job["payload"].get(
                 "texture_quality",
                 self.config.get("generation", {}).get("default_texture_quality", "fast"),

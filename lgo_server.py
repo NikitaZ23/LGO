@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import cgi
 import json
+import math
 import mimetypes
 import subprocess
 import sys
@@ -156,6 +157,10 @@ class LGOHandler(SimpleHTTPRequestHandler):
         object_type = _object_type_field(form)
         scale_preset = _scale_preset_field(form)
         target_height_m = _target_height_field(form, scale_preset)
+        try:
+            target_length_m = _target_length_value(_field(form, "target_length_m", ""))
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         texture_quality = _texture_quality_field(form)
         texture_color = _texture_color_field(form)
         texture = _field(form, "texture", "false") == "true"
@@ -167,6 +172,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
             "object_type": object_type,
             "scale_preset": scale_preset,
             "target_height_m": target_height_m,
+            "target_length_m": target_length_m,
             "texture_quality": texture_quality,
             "texture_color": texture_color,
             "texture": texture,
@@ -558,6 +564,18 @@ def _target_height_value(value: Any, scale_preset: str | None = None) -> float:
     except (TypeError, ValueError):
         parsed = float(default_height or 1.8)
     return round(max(0.01, min(10000.0, parsed)), 3)
+
+
+def _target_length_value(value: Any) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        raise ValueError("Length must be a number between 0.01 and 10000 metres, or empty for Auto.") from None
+    if not math.isfinite(parsed) or not 0.01 <= parsed <= 10000.0:
+        raise ValueError("Length must be between 0.01 and 10000 metres.")
+    return round(parsed, 3)
 
 
 def _default_texture_quality() -> str:

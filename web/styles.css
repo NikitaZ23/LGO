@@ -381,7 +381,7 @@ button:disabled {
 
 .number-control {
   display: grid;
-  grid-template-columns: auto minmax(96px, 140px) auto;
+  grid-template-columns: minmax(52px, 1fr) minmax(96px, 140px) auto;
   align-items: center;
   gap: 8px;
   color: var(--muted);
