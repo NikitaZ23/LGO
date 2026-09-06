@@ -30,10 +30,14 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--texture-only", action="store_true")
     parser.add_argument("--rebake-texture", action="store_true")
+    parser.add_argument("--export-only", action="store_true")
     args = parser.parse_args()
 
     config = _read_config(args.config)
     job = _read_json(args.job)
+    if args.export_only:
+        _run_export_only(args.job, config, job)
+        return
     _setup_runtime(config)
 
     if args.dry_run:
@@ -53,6 +57,23 @@ def main() -> None:
         raise
 
 
+def _run_export_only(job_path: Path, config: dict[str, Any], job: dict[str, Any]) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from lgo.exports import convert_export
+
+    request = job["export_request"]
+    previous = request.get("previous_status", "completed")
+    try:
+        result = convert_export(job, config)
+        exports = [*_read_json(job_path).get("exports", []), result]
+        _update_job(job_path, previous, f"{request['format'].upper()} export completed.", exports=exports,
+                    export_request={**request, "status": "completed"})
+    except Exception as exc:
+        traceback.print_exc()
+        _update_job(job_path, previous, f"Export failed: {exc}",
+                    export_request={**request, "status": "failed", "error": str(exc)})
+
+
 def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any]) -> None:
     started_at = time.time()
     payload = job["payload"]
@@ -69,8 +90,11 @@ def _run_generation(job_path: Path, config: dict[str, Any], job: dict[str, Any])
         (
             "Cleaning input background and shadows. "
             f"Quality: {quality['label']}. Object type: {object_type['label']}. "
-            f"Scale: {scale['label']} {scale['target_height_m']}m. "
-            f"Length: {str(scale['target_length_m']) + 'm' if scale['target_length_m'] is not None else 'Auto'}."
+            + (
+                f"Scale: {scale['label']} {scale['target_height_m']}m. "
+                f"Length: {str(scale['target_length_m']) + 'm' if scale['target_length_m'] is not None else 'Auto'}."
+                if scale["apply_dimensions"] else "Scale: original size (dimension override disabled)."
+            )
         ),
         quality=quality,
         object_type=object_type,
@@ -485,20 +509,25 @@ def _resolve_scale_settings(config: dict[str, Any], payload: dict[str, Any]) -> 
         selected = next(iter(presets))
 
     preset = copy.deepcopy(presets.get(selected, {}))
+    apply_dimensions = payload.get("apply_dimensions", True)
     default_height = preset.get("target_height_m", generation.get("default_target_height_m", 1.8))
-    if selected == "custom":
+    if not apply_dimensions:
+        target_height = None
+    elif selected == "custom":
         target_height = _target_height_value(payload.get("target_height_m"), default_height)
     else:
         target_height = _target_height_value(default_height, default_height)
     vertical_axis = _scale_axis_value(preset.get("vertical_axis", "y"))
-    target_length = _target_length_value(payload.get("target_length_m"))
+    target_length = _target_length_value(payload.get("target_length_m")) if apply_dimensions else None
 
     payload["scale_preset"] = selected
+    payload["apply_dimensions"] = apply_dimensions
     payload["target_height_m"] = target_height
     payload["target_length_m"] = target_length
 
     return {
         "selected": selected,
+        "apply_dimensions": apply_dimensions,
         "label": preset.get("label", selected.replace("_", " ").title()),
         "target_height_m": target_height,
         "vertical_axis": vertical_axis,
@@ -554,6 +583,9 @@ def _scale_axis_index(axis: str) -> int:
 
 
 def _apply_mesh_scale(mesh, scale: dict[str, Any]):
+    if not scale.get("apply_dimensions", True):
+        return mesh, {**scale, "applied": False, "reason": "dimension override disabled"}
+
     try:
         import numpy as np
     except Exception as exc:  # noqa: BLE001 - scaling should not prevent a useful model export.
@@ -1687,7 +1719,11 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
         mesh.export(str(white_obj), include_normals=False)
 
         _patch_snapshot_download(paint_root)
-        _patch_texture_remesh_target(texture_pipeline_module, config)
+        preserve_geometry = bool(config.get("generation", {}).get("texture_preserve_geometry", False))
+        if not preserve_geometry:
+            _patch_texture_remesh_target(texture_pipeline_module, config)
+        else:
+            _append_log("Texture: preserving white mesh geometry and UV image maps; remesh disabled.")
         six_views = isinstance(images, dict) and "top" in images and "bottom" in images
         multiple_references = isinstance(images, dict) and len(images) > 1
         texture_views = int(config["generation"].get("texture_views", 6))
@@ -1717,6 +1753,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             image_path=texture_prompt,
             output_mesh_path=str(textured_obj),
             save_glb=False,
+            use_remesh=not preserve_geometry,
         )
         if multiple_references:
             if not reference_pipeline.calls:
@@ -1728,8 +1765,10 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             "roughness": str(textured_obj).replace(".obj", "_roughness.jpg"),
         }
         texture_material = _stabilize_pbr_textures(textures, config)
-        create_glb_with_pbr_materials(str(textured_obj), textures, str(remesh_glb))
-        _append_log("Baking texture colors back onto the white mesh geometry.")
+        if not preserve_geometry:
+            create_glb_with_pbr_materials(str(textured_obj), textures, str(remesh_glb))
+        _append_log("Exporting original geometry with UV/PBR maps." if preserve_geometry
+                    else "Baking texture colors back onto the white mesh geometry.")
         textured_postprocess = _bake_texture_to_shape_mesh(
             mesh,
             textured_obj,
@@ -1737,9 +1776,13 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             textured_glb,
             config,
             _primary_image(images),
+            require_uv=preserve_geometry,
         )
         warning = None
         if not textured_postprocess.get("applied"):
+            if preserve_geometry:
+                reason = textured_postprocess.get("reason", "UV export failed")
+                return None, f"Texture failed, kept white mesh: {reason}", textured_postprocess
             warning = "Texture bake to white mesh failed; using the paint remesh geometry."
             shutil.copy2(remesh_glb, textured_glb)
             fallback_report = _refine_textured_glb(textured_glb, config)
@@ -1750,7 +1793,7 @@ def _try_texture(config: dict[str, Any], output_dir: Path, mesh, images) -> tupl
             ]
         textured_postprocess["texture_prompt"] = texture_prompt_report
         textured_postprocess["texture_material"] = texture_material
-        textured_postprocess["paint_remesh_glb"] = str(remesh_glb)
+        textured_postprocess["paint_remesh_glb"] = str(remesh_glb) if not preserve_geometry else None
         _append_log(f"Texture bake method: {textured_postprocess.get('method') or 'fallback_remesh'}.")
         return textured_glb, warning, textured_postprocess
     except Exception as exc:  # noqa: BLE001 - shape output is still useful without texture.
@@ -1766,6 +1809,7 @@ def _bake_texture_to_shape_mesh(
     config: dict[str, Any],
     reference_image: Image.Image | None = None,
     shade_smooth: bool = True,
+    require_uv: bool = False,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "enabled": True,
@@ -1796,6 +1840,18 @@ def _bake_texture_to_shape_mesh(
         if target_vertices.size == 0 or len(shape.faces) == 0:
             report["reason"] = "white mesh is empty"
             return report
+        if config.get("generation", {}).get("texture_preserve_geometry", False):
+            aligned = _match_uv_geometry(shape, source_mesh) if source_uv is not None else None
+            if aligned is not None:
+                source_mesh.vertices = aligned
+                return _export_uv_texture(source_mesh, source_image, textured_obj, target_glb,
+                                          config, reference_image, shade_smooth, report)
+            if require_uv:
+                report["reason"] = "Paint UV geometry does not match the white mesh; refusing to replace its shape."
+                return report
+            report["warnings"].append(
+                "Legacy remeshed texture: using vertex colors. Re-run texture to create UV maps on the original geometry."
+            )
         if source_uv is None:
             report["warnings"].append("Textured OBJ has no UV coordinates; nearest vertex color fallback will be used.")
 
@@ -1833,6 +1889,10 @@ def _bake_texture_to_shape_mesh(
             )
 
         colors, color_report = _adjust_baked_vertex_colors(colors, config, reference_image)
+        if config.get("generation", {}).get("texture_preserve_geometry", False):
+            # glTF COLOR_0 is linear, while the sampled albedo image is sRGB.
+            colors = _srgb_to_linear_vertex_colors(colors)
+            color_report["vertex_color_space"] = "linear"
 
         vertex_colors = np.column_stack(
             [
@@ -1841,6 +1901,10 @@ def _bake_texture_to_shape_mesh(
             ]
         )
         shape.visual = trimesh.visual.ColorVisuals(mesh=shape, vertex_colors=vertex_colors)
+        if config.get("generation", {}).get("texture_preserve_geometry", False):
+            shape.visual.material = trimesh.visual.material.PBRMaterial(
+                name="LGO legacy vertex material", metallicFactor=0.0, roughnessFactor=0.8,
+            )
         shape.export(str(target_glb))
 
         report.update(
@@ -1869,6 +1933,81 @@ def _bake_texture_to_shape_mesh(
         traceback.print_exc()
         report["reason"] = str(exc)
         report["warnings"].append(f"Texture bake to white mesh failed: {exc}")
+    return report
+
+
+def _match_uv_geometry(shape, source):
+    """Match triangles, not just bounds; UV seam vertices may be duplicated."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    if len(shape.faces) != len(source.faces) or not len(source.vertices):
+        return None
+    vertices, inverse = np.unique(np.asarray(shape.vertices), axis=0, return_inverse=True)
+    tolerance = max(float(np.ptp(vertices, axis=0).max()) * 1e-6, 1e-8)
+    distances, indices = cKDTree(vertices).query(np.asarray(source.vertices), k=1)
+    if not np.all(np.isfinite(distances)) or float(distances.max()) > tolerance:
+        return None
+
+    def canonical_faces(faces):
+        # Rotate each triangle to its lowest index, retaining winding.
+        start = np.argmin(faces, axis=1)
+        rotated = np.take_along_axis(faces, (start[:, None] + np.arange(3)) % 3, axis=1)
+        return rotated[np.lexsort(rotated.T[::-1])]
+
+    if not np.array_equal(canonical_faces(inverse[shape.faces]), canonical_faces(indices[source.faces])):
+        return None
+    return vertices[indices]
+
+
+def _srgb_to_linear_vertex_colors(colors):
+    import numpy as np
+
+    values = np.clip(np.asarray(colors, dtype=np.float32) / 255.0, 0.0, 1.0)
+    return np.rint(np.where(values <= 0.04045, values / 12.92, ((values + 0.055) / 1.055) ** 2.4) * 255.0)
+
+
+def _export_uv_texture(source, source_image, textured_obj, target_glb, config,
+                       reference_image, shade_smooth, report):
+    import numpy as np
+    import trimesh
+
+    colors, color_report = _adjust_baked_vertex_colors(source_image.reshape(-1, 3), config, reference_image)
+    albedo = Image.fromarray(np.rint(colors.reshape(source_image.shape)).clip(0, 255).astype(np.uint8))
+    metallic_path = textured_obj.with_name(f"{textured_obj.stem}_metallic.jpg")
+    roughness_path = textured_obj.with_name(f"{textured_obj.stem}_roughness.jpg")
+    packed = None
+    if metallic_path.exists() and roughness_path.exists():
+        with Image.open(metallic_path) as image:
+            metallic = image.convert("L")
+        with Image.open(roughness_path) as image:
+            roughness = image.convert("L").resize(metallic.size, Image.Resampling.BILINEAR)
+        packed = Image.merge("RGB", (Image.new("L", metallic.size, 255), roughness, metallic))
+    else:
+        report["warnings"].append("PBR maps missing; using a non-metallic material without roughness/metallic textures.")
+    material = trimesh.visual.material.PBRMaterial(
+        name="LGO UV material", baseColorFactor=[1.0, 1.0, 1.0, 1.0],
+        baseColorTexture=albedo, metallicRoughnessTexture=packed,
+        metallicFactor=1.0 if packed is not None else 0.0, roughnessFactor=1.0,
+        alphaMode="OPAQUE",
+    )
+    source.visual = trimesh.visual.TextureVisuals(uv=_mesh_uv(source), material=material)
+    temporary = target_glb.with_name(f"{target_glb.stem}.{uuid.uuid4().hex}.tmp.glb")
+    try:
+        source.export(str(temporary))
+        smooth_report = _shade_smooth_glb(config, temporary) if shade_smooth else {"enabled": False, "applied": False}
+        material_report = _stabilize_glb_pbr_materials(temporary, config)
+        temporary.replace(target_glb)
+    finally:
+        temporary.unlink(missing_ok=True)
+    smooth_report["path"] = str(target_glb)
+    report.update({
+        "applied": True, "method": "original_geometry_uv", "geometry_preserved": True,
+        "vertices": len(source.vertices), "faces": len(source.faces),
+        "texture_size": [source_image.shape[1], source_image.shape[0]],
+        "color": color_report, "color_storage": "sRGB image", "pbr_maps": packed is not None,
+        "shade_smooth": smooth_report, "glb_material": material_report,
+    })
     return report
 
 
@@ -2959,6 +3098,7 @@ def _snapshot_texture_version(
         "scale_preset": payload.get("scale_preset"),
         "target_height_m": payload.get("target_height_m"),
         "target_length_m": payload.get("target_length_m"),
+        "apply_dimensions": payload.get("apply_dimensions", True),
         "rebake_albedo": payload.get("rebake_albedo"),
         "texture_color": payload.get("texture_color"),
         "outputs": outputs,

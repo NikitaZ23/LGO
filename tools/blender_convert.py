@@ -6,14 +6,16 @@ from pathlib import Path
 import bpy
 
 
-def _args() -> tuple[Path, Path]:
+def _args() -> tuple[Path, Path, bool]:
     if "--" not in sys.argv:
         raise SystemExit("Usage: blender --background --python blender_convert.py -- input output")
     index = sys.argv.index("--")
     values = sys.argv[index + 1 :]
+    no_postprocess = "--no-postprocess" in values
+    values = [value for value in values if value != "--no-postprocess"]
     if len(values) != 2:
         raise SystemExit("Expected input and output paths.")
-    return Path(values[0]), Path(values[1])
+    return Path(values[0]), Path(values[1]), no_postprocess
 
 
 def _clear_scene() -> None:
@@ -44,7 +46,6 @@ def _shade_smooth() -> None:
         for polygon in obj.data.polygons:
             polygon.use_smooth = True
         _apply_weighted_normals(obj)
-        _soften_materials(obj)
         obj.data.update()
 
 
@@ -63,58 +64,18 @@ def _apply_weighted_normals(obj) -> None:
         obj.data.update()
 
 
-def _soften_materials(obj) -> None:
-    for slot in obj.material_slots:
-        material = slot.material
-        if material is None:
-            continue
-        if hasattr(material, "roughness"):
-            try:
-                material.roughness = max(float(material.roughness), 0.78)
-            except (TypeError, ValueError):
-                pass
-        if hasattr(material, "metallic"):
-            try:
-                material.metallic = min(float(material.metallic), 0.04)
-            except (TypeError, ValueError):
-                pass
-        if not material.use_nodes or material.node_tree is None:
-            continue
-        for node in material.node_tree.nodes:
-            if node.type == "BSDF_PRINCIPLED":
-                _set_input_min(node, "Roughness", 0.78)
-                _set_input_max(node, "Metallic", 0.04)
-                _set_input_max(node, "Specular IOR Level", 0.35)
-                _set_input_max(node, "Specular Tint", 0.2)
-
-
-def _set_input_min(node, name: str, minimum: float) -> None:
-    socket = node.inputs.get(name)
-    if socket is not None and hasattr(socket, "default_value"):
-        try:
-            socket.default_value = max(float(socket.default_value), minimum)
-        except (TypeError, ValueError):
-            pass
-
-
-def _set_input_max(node, name: str, maximum: float) -> None:
-    socket = node.inputs.get(name)
-    if socket is not None and hasattr(socket, "default_value"):
-        try:
-            socket.default_value = min(float(socket.default_value), maximum)
-        except (TypeError, ValueError):
-            pass
-
-
 def _export(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     suffix = path.suffix.lower()
     if suffix in {".glb", ".gltf"}:
         bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB" if suffix == ".glb" else "GLTF_SEPARATE")
     elif suffix == ".fbx":
+        _write_textures(path.parent)
         bpy.ops.export_scene.fbx(filepath=str(path), path_mode="COPY", embed_textures=True)
     elif suffix == ".obj":
-        bpy.ops.wm.obj_export(filepath=str(path))
+        _write_textures(path.parent)
+        bpy.ops.wm.obj_export(filepath=str(path), path_mode="RELATIVE", export_materials=True,
+                              export_pbr_extensions=True, export_colors=True)
     elif suffix == ".ply":
         bpy.ops.wm.ply_export(filepath=str(path))
     elif suffix == ".stl":
@@ -123,13 +84,34 @@ def _export(path: Path) -> None:
         raise ValueError(f"Unsupported output format: {suffix}")
 
 
+def _write_textures(directory: Path) -> None:
+    for index, image in enumerate(bpy.data.images):
+        if image.type != "IMAGE" or (not image.packed_file and not image.has_data):
+            continue
+        folder = directory / "textures"
+        folder.mkdir(exist_ok=True)
+        extension = {"JPEG": ".jpg", "PNG": ".png"}.get(image.file_format, ".png")
+        target = folder / f"texture_{index}{extension}"
+        if image.packed_file:
+            target.write_bytes(bytes(image.packed_file.data))
+            # The OBJ exporter skips images still marked as packed.
+            image.unpack(method="REMOVE")
+        else:
+            image.file_format = "PNG"
+            target = target.with_suffix(".png")
+            image.filepath_raw = str(target)
+            image.save()
+        image.filepath = str(target)
+
+
 def main() -> None:
-    input_path, output_path = _args()
+    input_path, output_path, no_postprocess = _args()
     if not input_path.exists():
         raise FileNotFoundError(input_path)
     _clear_scene()
     _import(input_path)
-    _shade_smooth()
+    if not no_postprocess:
+        _shade_smooth()
     _export(output_path)
     print(f"Converted {input_path} -> {output_path}")
 

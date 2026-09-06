@@ -6,4 +6,4 @@ python-multipart>=0.0.9
 pillow>=10.0
 numpy>=1.26
 trimesh>=4.4
-
+scipy>=1.11

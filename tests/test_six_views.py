@@ -101,12 +101,13 @@ class SixViewTests(unittest.TestCase):
             runner._TextureReferencePipeline(SimpleNamespace(unet=SimpleNamespace(use_ra=False)), self.images)
 
     def test_texture_pass_uses_all_references_for_single_four_and_six_views(self):
-        for reference_count in (1, 4, 6):
-            with self.subTest(reference_count=reference_count), ExitStack() as stack:
+        for reference_count, preserve_geometry in ((1, False), (4, False), (6, False), (4, True)):
+            with self.subTest(reference_count=reference_count, preserve_geometry=preserve_geometry), ExitStack() as stack:
                 raw_pipeline = Mock()
                 raw_pipeline.unet = SimpleNamespace(use_ra=True)
                 raw_pipeline.view_size = 512
                 configs = []
+                paint_calls = []
 
                 class FakePaint:
                     def __init__(self, config):
@@ -114,6 +115,7 @@ class SixViewTests(unittest.TestCase):
                         self.models = {"multiview_model": SimpleNamespace(pipeline=raw_pipeline)}
 
                     def __call__(self, **kwargs):
+                        paint_calls.append(kwargs)
                         self.models["multiview_model"].pipeline([kwargs["image_path"]], width=384, height=384)
 
                 vendor = SimpleNamespace(
@@ -132,8 +134,9 @@ class SixViewTests(unittest.TestCase):
                 stack.enter_context(patch.object(runner, "_texture_runtime_ready", return_value=True))
                 stack.enter_context(patch.object(runner, "_prepare_mesh_for_export", return_value=Mock()))
                 stack.enter_context(patch.object(runner, "_stabilize_pbr_textures", return_value={}))
-                stack.enter_context(patch.object(runner, "_bake_texture_to_shape_mesh", return_value={"applied": True}))
-                config = {"generation": {"texture_views": 4, "texture_resolution": 384},
+                bake = stack.enter_context(patch.object(runner, "_bake_texture_to_shape_mesh", return_value={"applied": True}))
+                config = {"generation": {"texture_views": 4, "texture_resolution": 384,
+                                         "texture_preserve_geometry": preserve_geometry},
                           "paths": {"hunyuan_source_dir": str(self.root)},
                           "models": {"paint_root": str(self.root), "realesrgan": "upscale"}}
                 views = runner.TEXTURE_VIEW_ORDER[:reference_count]
@@ -141,6 +144,8 @@ class SixViewTests(unittest.TestCase):
                 output, warning, report = runner._try_texture(config, self.root, Mock(), images)
                 self.assertIsNone(warning)
                 self.assertEqual(output, self.root / "textured_mesh.glb")
+                self.assertEqual(paint_calls[0]["use_remesh"], not preserve_geometry)
+                self.assertEqual(bake.call_args.kwargs["require_uv"], preserve_geometry)
                 supplied = raw_pipeline.call_args.args[0]
                 self.assertEqual(len(supplied), reference_count)
                 self.assertEqual([image.getpixel((0, 0))[:3] for image in supplied],

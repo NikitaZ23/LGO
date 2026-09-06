@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from lgo.environment import check_environment
+from lgo.exports import prepare_export, cached_export
 from lgo.generation import GenerationService
 from lgo.jobs import JobStore
 from lgo.settings import PROJECT_ROOT, load_config
@@ -25,6 +26,8 @@ RUNS_DIR = Path(CONFIG["service"]["runs_dir"])
 STORE = JobStore(RUNS_DIR)
 GENERATOR = GenerationService(CONFIG)
 WEB_ROOT = PROJECT_ROOT / "web"
+EXPORT_LOCK = threading.Lock()
+EXPORTS_STOPPING = threading.Event()
 ACTIVE_JOB_STATUSES = {
     "created",
     "prepared",
@@ -98,7 +101,9 @@ class LGOHandler(SimpleHTTPRequestHandler):
         request_path = request_url.path
         query = parse_qs(request_url.query)
         if request_path == "/api/shutdown":
-            stopped = _stop_service_work("Stopped by service shutdown.")
+            with EXPORT_LOCK:
+                EXPORTS_STOPPING.set()
+                stopped = _stop_service_work("Stopped by service shutdown.")
             count = len(stopped)
             message = (
                 f"LGO shutdown command sent. Stopped {count} active job(s)."
@@ -119,6 +124,8 @@ class LGOHandler(SimpleHTTPRequestHandler):
 
         if request_path.startswith("/api/jobs/"):
             parts = request_path.strip("/").split("/")
+            if len(parts) == 4 and parts[3] == "export":
+                return self._export_result(parts[2], query)
             if len(parts) == 4 and parts[3] == "texture":
                 return self._add_texture(
                     parts[2],
@@ -156,9 +163,10 @@ class LGOHandler(SimpleHTTPRequestHandler):
         quality = _quality_field(form)
         object_type = _object_type_field(form)
         scale_preset = _scale_preset_field(form)
-        target_height_m = _target_height_field(form, scale_preset)
+        apply_dimensions = _field(form, "apply_dimensions", "true") == "true"
+        target_height_m = _target_height_field(form, scale_preset) if apply_dimensions else None
         try:
-            target_length_m = _target_length_value(_field(form, "target_length_m", ""))
+            target_length_m = _target_length_value(_field(form, "target_length_m", "")) if apply_dimensions else None
         except ValueError as exc:
             return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         texture_quality = _texture_quality_field(form)
@@ -171,6 +179,7 @@ class LGOHandler(SimpleHTTPRequestHandler):
             "quality": quality,
             "object_type": object_type,
             "scale_preset": scale_preset,
+            "apply_dimensions": apply_dimensions,
             "target_height_m": target_height_m,
             "target_length_m": target_length_m,
             "texture_quality": texture_quality,
@@ -203,6 +212,48 @@ class LGOHandler(SimpleHTTPRequestHandler):
             STORE.update(job, "failed", str(exc))
 
         return self._json(job, HTTPStatus.CREATED)
+
+    def _export_result(self, job_id: str, query: dict[str, list[str]]) -> None:
+        if not job_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in job_id):
+            return self._json({"error": "Invalid job id."}, HTTPStatus.BAD_REQUEST)
+        with EXPORT_LOCK:
+            if EXPORTS_STOPPING.is_set():
+                return self._json({"error": "Service is shutting down."}, HTTPStatus.SERVICE_UNAVAILABLE)
+            job = STORE.get(job_id)
+            if job is None:
+                return self._json({"error": "Job not found."}, HTTPStatus.NOT_FOUND)
+            if job.get("status") in ACTIVE_JOB_STATUSES:
+                return self._json({"error": "Wait for the current job operation to finish."}, HTTPStatus.CONFLICT)
+            started = False
+            try:
+                request = prepare_export(job, CONFIG, query.get("source", [""])[0], query.get("format", [""])[0])
+                cached = cached_export(job, request)
+                if cached:
+                    job["export_request"] = {**request, "status": "completed"}
+                    cached["source_cache_key"] = request["source_cache_key"]
+                    STORE.write(job)
+                    return self._json(job)
+                STORE.update(job, "converting_outputs", f"Exporting selected result to {request['format'].upper()}.",
+                             export_request=request)
+                started = True
+                process = GENERATOR.start_export(job)
+                latest = STORE.get(job_id)
+                if latest.get("status") == "converting_outputs":
+                    latest.update(process)
+                    STORE.write(latest)
+                return self._json(latest, HTTPStatus.ACCEPTED)
+            except (ValueError, FileNotFoundError) as exc:
+                if started:
+                    previous = job["export_request"].get("previous_status", "completed")
+                    STORE.update(job, previous, f"Export failed: {exc}",
+                                 export_request={**job["export_request"], "status": "failed", "error": str(exc)})
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                if started:
+                    previous = job["export_request"]["previous_status"]
+                    STORE.update(job, previous, f"Export failed: {exc}",
+                                 export_request={**job["export_request"], "status": "failed", "error": str(exc)})
+                return self._json({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _add_texture(self, job_id: str, texture_quality: str, object_type: str | None, texture_color: float) -> None:
         job = STORE.get(job_id)

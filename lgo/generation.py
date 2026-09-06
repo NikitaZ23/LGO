@@ -34,6 +34,7 @@ class GenerationService:
                 self.config.get("generation", {}).get("default_target_height_m", 1.8),
             ),
             "target_length_m": job["payload"].get("target_length_m"),
+            "apply_dimensions": job["payload"].get("apply_dimensions", True),
             "texture_quality": job["payload"].get(
                 "texture_quality",
                 self.config.get("generation", {}).get("default_texture_quality", "fast"),
@@ -70,6 +71,9 @@ class GenerationService:
     def start_texture_rebake(self, job: dict[str, Any]) -> dict[str, Any]:
         return self._start_runner(job, ["--rebake-texture"])
 
+    def start_export(self, job: dict[str, Any]) -> dict[str, Any]:
+        return self._start_runner(job, ["--export-only"])
+
     def _start_runner(self, job: dict[str, Any], extra_args: list[str] | None = None) -> dict[str, Any]:
         run_dir = Path(job["run_dir"])
         log_path = run_dir / "run.log"
@@ -96,7 +100,8 @@ class GenerationService:
 
         popen_kwargs: dict[str, Any] = {}
         if os.name == "nt":
-            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            popen_kwargs["creationflags"] = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                             | getattr(subprocess, "CREATE_NO_WINDOW", 0))
         else:
             popen_kwargs["start_new_session"] = True
         with log_path.open("ab") as log:

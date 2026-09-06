@@ -9,6 +9,8 @@ const modeInput = document.querySelector("#mode");
 const qualityInput = document.querySelector("#quality");
 const objectTypeInput = document.querySelector("#objectType");
 const scalePresetInput = document.querySelector("#scalePreset");
+const applyDimensionsInput = document.querySelector("#applyDimensions");
+const applyDimensionsCheckbox = document.querySelector("#applyDimensionsCheckbox");
 const targetHeightInput = document.querySelector("#targetHeight");
 const targetHeightValueInput = document.querySelector("#targetHeightValue");
 const targetLengthInput = document.querySelector("#targetLength");
@@ -46,6 +48,12 @@ const modelViewer = document.querySelector("#modelViewer");
 const sceneFrame = document.querySelector(".scene-frame");
 const viewerChoiceBar = document.querySelector("#viewerChoices");
 const outputLinks = document.querySelector("#outputLinks");
+const exportButtons = document.querySelectorAll("[data-export-format]");
+const exportStatus = document.querySelector("#exportStatus");
+const exportLinks = document.querySelector("#exportLinks");
+const pendingExports = new Set();
+const exportErrors = new Map();
+exportButtons.forEach((button) => button.addEventListener("click", () => exportResult(button.dataset.exportFormat)));
 const ratingPanel = document.querySelector("#ratingPanel");
 const historyList = document.querySelector("#historyList");
 const refreshHistory = document.querySelector("#refreshHistory");
@@ -225,7 +233,7 @@ function setScalePreset(scalePreset, options = {}) {
 
   const isCustom = selected === "custom";
   if (targetHeightValueInput) {
-    targetHeightValueInput.disabled = !isCustom;
+    targetHeightValueInput.disabled = !applyDimensionsCheckbox.checked || !isCustom;
     if (!isCustom) {
       targetHeightValueInput.value = String(scalePresetHeights[selected] || scalePresetHeights.character);
     } else if (!targetHeightValueInput.value) {
@@ -234,6 +242,19 @@ function setScalePreset(scalePreset, options = {}) {
   }
   syncTargetHeight({ normalizeVisible: true });
 }
+
+function setApplyDimensions(enabled) {
+  applyDimensionsCheckbox.checked = enabled;
+  applyDimensionsInput.value = String(enabled);
+  localStorage.setItem("lgo.applyDimensions", String(enabled));
+  targetHeightInput.disabled = !enabled;
+  targetLengthInput.disabled = !enabled;
+  targetHeightValueInput.disabled = !enabled || scalePresetInput.value !== "custom";
+  targetLengthValueInput.disabled = !enabled;
+  scalePresetButtons.forEach((button) => { button.disabled = !enabled; });
+}
+
+applyDimensionsCheckbox.addEventListener("change", () => setApplyDimensions(applyDimensionsCheckbox.checked));
 
 scalePresetButtons.forEach((button) => {
   button.addEventListener("click", () => setScalePreset(button.dataset.scalePreset));
@@ -420,7 +441,7 @@ if (rebakeTextureButton) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!syncTargetLength()) {
+  if (applyDimensionsCheckbox.checked && !syncTargetLength()) {
     targetLengthValueInput.reportValidity();
     return;
   }
@@ -480,7 +501,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 function renderJob(job, options = {}) {
-  const restoreLength = job.id !== currentJob?.id || (options.textureVersionId || "") !== currentTextureVersionId;
+  const restoreDimensions = job.id !== currentJob?.id || (options.textureVersionId || "") !== currentTextureVersionId;
   currentJobId = job.id || currentJobId;
   currentJob = job;
   currentTextureVersionId = options.textureVersionId || "";
@@ -494,18 +515,22 @@ function renderJob(job, options = {}) {
   ];
 
   if (job.payload) {
+    const applyDimensions = job.payload.apply_dimensions ?? job.scale?.apply_dimensions ?? true;
     const length = Object.hasOwn(job.payload, "target_length_m") ? job.payload.target_length_m : job.scale?.target_length_m;
     lines.push(`Quality: ${job.payload.quality || "default"}`);
     lines.push(`Object type: ${objectTypeLabel(job.payload.object_type || job.object_type?.selected)}`);
     if (job.payload.scale_preset || job.scale) {
-      lines.push(`Scale: ${scaleMeta(job.payload.scale_preset || job.scale?.selected, job.payload.target_height_m || job.scale?.target_height_m, length)}`);
-      setScalePreset(job.payload.scale_preset || job.scale?.selected, { markTouched: false });
-      if (job.payload.target_height_m || job.scale?.target_height_m) {
-        setTargetHeightValue(job.payload.target_height_m || job.scale?.target_height_m);
-      }
+      lines.push(`Scale: ${scaleMeta(job.payload.scale_preset || job.scale?.selected, job.payload.target_height_m || job.scale?.target_height_m, length, applyDimensions)}`);
     }
-    if (restoreLength) {
-      setTargetLengthValue(length);
+    if (restoreDimensions) {
+      setApplyDimensions(applyDimensions);
+      if (applyDimensions) {
+        setScalePreset(job.payload.scale_preset || job.scale?.selected, { markTouched: false });
+        if (job.payload.target_height_m || job.scale?.target_height_m) {
+          setTargetHeightValue(job.payload.target_height_m || job.scale?.target_height_m);
+        }
+        setTargetLengthValue(length);
+      }
     }
     lines.push(`Texture: ${job.payload.texture ? "PBR texture" : "No texture"}`);
     lines.push(`Texture speed: ${textureQualityLabel(job.payload.texture_quality || job.texture_quality?.selected)}`);
@@ -557,13 +582,20 @@ function renderJob(job, options = {}) {
   loadJobLog(job, lines.join("\n"));
 }
 
-async function pollJob(jobId) {
+async function pollJob(jobId, preserveSelection = false) {
   try {
     const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
     const payload = await response.json();
-    renderJob(payload);
+    if (currentJobId && currentJobId !== jobId) return;
+    if (!response.ok) throw new Error(payload.error || response.statusText);
+    if (preserveSelection || payload.export_request?.status === "running" || currentJob?.export_request?.status === "running") {
+      renderExportJob(payload);
+      preserveSelection = true;
+    } else {
+      renderJob(payload);
+    }
     if (!terminalStatuses.has(payload.status)) {
-      pollTimer = setTimeout(() => pollJob(jobId), 5000);
+      pollTimer = setTimeout(() => pollJob(jobId, preserveSelection), preserveSelection ? 1500 : 5000);
     } else {
       void loadHistory();
     }
@@ -811,6 +843,7 @@ async function loadHistoryTexture(jobId, versionId) {
     localStorage.setItem("lgo.lastJobId", job.id);
     localStorage.setItem("lgo.lastTextureVersionId", version.id);
     renderJob(textureJob, { preferredScene: "texture", textureVersionId: version.id });
+    if (!terminalStatuses.has(job.status)) pollJob(job.id, true);
   } catch (error) {
     runBadge.textContent = "Failed";
     jobStatus.textContent = `Could not load texture version ${versionId}.\n\n${error}`;
@@ -834,6 +867,7 @@ function jobWithTextureVersion(job, version) {
     scale_preset: version.scale_preset || clone.payload?.scale_preset,
     target_height_m: version.target_height_m ?? clone.payload?.target_height_m,
     target_length_m: version.target_length_m !== undefined ? version.target_length_m : clone.payload?.target_length_m,
+    apply_dimensions: version.apply_dimensions ?? clone.payload?.apply_dimensions ?? true,
     rebake_albedo: version.rebake_albedo ?? clone.payload?.rebake_albedo,
     texture_color: version.texture_color ?? clone.payload?.texture_color,
   };
@@ -842,6 +876,7 @@ function jobWithTextureVersion(job, version) {
   clone.scale_preset = version.scale_preset || clone.scale_preset;
   clone.target_height_m = version.target_height_m ?? clone.target_height_m;
   clone.target_length_m = version.target_length_m !== undefined ? version.target_length_m : clone.target_length_m;
+  clone.apply_dimensions = version.apply_dimensions ?? clone.apply_dimensions ?? true;
   clone.rebake_albedo = version.rebake_albedo ?? clone.rebake_albedo;
   clone.texture_color = version.texture_color ?? clone.texture_color;
   return clone;
@@ -852,7 +887,7 @@ function historyMeta(job) {
   const texture = job.texture ? "texture" : "no texture";
   const quality = job.quality || "default";
   const objectType = objectTypeLabel(job.object_type);
-  const scale = job.target_height_m ? scaleMeta(job.scale_preset, job.target_height_m, job.target_length_m) : "";
+  const scale = scaleMeta(job.scale_preset, job.target_height_m, job.target_length_m, job.apply_dimensions);
   const textureQuality = `${textureQualityLabel(job.texture_quality)} tex`;
   const albedo = albedoMeta(job.rebake_albedo);
   const color = textureColorMeta(job.texture_color);
@@ -895,10 +930,9 @@ function textureKindLabel(kind) {
 function textureHistoryMeta(job, version) {
   const source = job.display_name || job.id;
   const objectType = objectTypeLabel(version.object_type || job.object_type);
-  const scale = (version.target_height_m ?? job.target_height_m)
-    ? scaleMeta(version.scale_preset || job.scale_preset, version.target_height_m ?? job.target_height_m,
-      version.target_length_m !== undefined ? version.target_length_m : job.target_length_m)
-    : "";
+  const scale = scaleMeta(version.scale_preset || job.scale_preset, version.target_height_m ?? job.target_height_m,
+    version.target_length_m !== undefined ? version.target_length_m : job.target_length_m,
+    version.apply_dimensions ?? job.apply_dimensions);
   const textureQuality = `${textureQualityLabel(version.texture_quality || job.texture_quality)} tex`;
   const albedo = albedoMeta(version.rebake_albedo);
   const color = textureColorMeta(version.texture_color);
@@ -941,7 +975,8 @@ function renderOutputs(job, options = {}) {
   const sceneOutputs = collectSceneOutputs(job);
   const { glbOutputs, whiteGlb, texturedGlb, fallbackGlb } = sceneOutputs;
   currentSceneOutputs = sceneOutputs;
-  const primaryGlb = choosePrimaryGlb(sceneOutputs, options.preferredScene);
+  const primaryGlb = glbOutputs.find((output) => output.filename === options.preferredFilename)
+    || choosePrimaryGlb(sceneOutputs, options.preferredScene);
 
   const viewerChoices = [whiteGlb, texturedGlb, fallbackGlb]
     .filter(Boolean)
@@ -966,6 +1001,8 @@ function renderOutputs(job, options = {}) {
   }
 
   updateResultTextureToggle(null, null);
+  currentSceneFilename = "";
+  renderExportControls();
 
   if (terminalStatuses.has(job.status) && outputs.length) {
     sceneStatus.textContent = "No GLB";
@@ -1027,6 +1064,68 @@ function showSceneOutput(job, output) {
   setSceneSource(job.id, output.filename, outputCacheKey(job, output));
   sceneStatus.textContent = sceneLoadedLabel(output);
   updateResultTextureToggle(output, currentSceneOutputs);
+  renderExportControls();
+}
+
+function renderExportJob(job) {
+  const version = (job.texture_versions || []).find((item) => item.id === currentTextureVersionId);
+  renderJob(version ? jobWithTextureVersion(job, version) : job, {
+    textureVersionId: version?.id || "",
+    preferredFilename: currentSceneFilename,
+  });
+}
+
+function renderExportControls() {
+  const selected = currentJob?.outputs?.find((output) => output.filename === currentSceneFilename && output.format === "glb");
+  const busy = pendingExports.has(currentJob?.id) || (currentJob && !terminalStatuses.has(currentJob.status));
+  exportButtons.forEach((button) => { button.disabled = !selected || busy; });
+  exportLinks.replaceChildren();
+  exportStatus.textContent = "";
+  if (!selected) return;
+  const request = currentJob.export_request;
+  const error = exportErrors.get(currentJob.id);
+  if (error) {
+    exportStatus.textContent = error;
+  } else if (pendingExports.has(currentJob.id)) {
+    exportStatus.textContent = "Starting export...";
+  } else if (request?.source === selected.filename) {
+    exportStatus.textContent = request.status === "failed" ? `Export failed: ${request.error}`
+      : request.status === "running" ? (busy ? `Exporting ${request.format.toUpperCase()}...` : "Export interrupted.")
+        : `${request.format.toUpperCase()} export ready`;
+  }
+  const formats = new Set();
+  [...(currentJob.exports || [])].reverse().forEach((item) => {
+    if (item.source !== selected.filename || item.source_cache_key !== outputCacheKey(currentJob, selected) || formats.has(item.format)) return;
+    formats.add(item.format);
+    const link = document.createElement("a");
+    link.href = outputUrl(currentJob.id, item.filename, item.cache_key);
+    link.download = item.download_name;
+    link.textContent = item.format === "obj" ? "Download OBJ + textures (ZIP)" : "Download FBX";
+    exportLinks.appendChild(link);
+  });
+}
+
+async function exportResult(format) {
+  if (!currentJob?.id || !currentSceneFilename || pendingExports.has(currentJob.id) || !terminalStatuses.has(currentJob.status)) return;
+  const jobId = currentJob.id;
+  const query = new URLSearchParams({ format, source: currentSceneFilename });
+  pendingExports.add(jobId);
+  exportErrors.delete(jobId);
+  renderExportControls();
+  clearTimeout(pollTimer);
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/export?${query}`, { method: "POST" });
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || response.statusText);
+    if (currentJobId !== jobId) return;
+    renderExportJob(job);
+    if (!terminalStatuses.has(job.status)) pollTimer = setTimeout(() => pollJob(jobId, true), 1500);
+  } catch (error) {
+    exportErrors.set(jobId, `Export failed: ${error.message}`);
+  } finally {
+    pendingExports.delete(jobId);
+    if (currentJobId === jobId) renderExportControls();
+  }
 }
 
 function updateResultTextureToggle(selectedOutput, sceneOutputs = currentSceneOutputs) {
@@ -1119,6 +1218,7 @@ function clearScene() {
   }
   currentSceneOutputs = null;
   updateResultTextureToggle(null, null);
+  renderExportControls();
 }
 
 function renderRatings(job, whiteGlb, texturedGlb) {
@@ -1864,7 +1964,10 @@ function scalePresetLabel(value) {
   return labels[selected] || "";
 }
 
-function scaleMeta(value, height, length) {
+function scaleMeta(value, height, length, enabled) {
+  if ((enabled ?? (typeof value === "object" ? value?.apply_dimensions : true)) === false) {
+    return "Original size";
+  }
   const selected = typeof value === "string" ? value : value?.selected || value?.scale_preset;
   const label = scalePresetLabel(selected);
   const sourceHeight = height ?? (typeof value === "object" ? value?.target_height_m : null);
@@ -1953,6 +2056,7 @@ function restoreLastJob() {
 }
 
 function restoreFormState() {
+  setApplyDimensions(localStorage.getItem("lgo.applyDimensions") === "true");
   setTargetLengthValue(localStorage.getItem("lgo.targetLength"));
   const storedScalePreset = localStorage.getItem("lgo.scalePreset");
   const storedMode = localStorage.getItem("lgo.mode");

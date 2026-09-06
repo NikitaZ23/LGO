@@ -379,6 +379,22 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.dimensions-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dimensions-toggle input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .number-control {
   display: grid;
   grid-template-columns: minmax(52px, 1fr) minmax(96px, 140px) auto;
@@ -866,4 +882,20 @@ button:disabled {
   .history-filter {
     min-width: 0;
   }
+}
+.result-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.result-export button {
+  min-width: 116px;
+}
+
+#exportStatus {
+  min-height: 1.5em;
+  overflow-wrap: anywhere;
 }

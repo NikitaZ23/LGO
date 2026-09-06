@@ -9,7 +9,7 @@
     <link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
     <link rel="shortcut icon" href="/favicon.ico?v=4">
-    <link rel="stylesheet" href="/styles.css?v=24">
+    <link rel="stylesheet" href="/styles.css?v=26">
     <script src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.1.1/dist/model-viewer.min.js" type="module"></script>
   </head>
   <body>
@@ -149,6 +149,7 @@
             <input type="hidden" id="quality" name="quality" value="high">
             <input type="hidden" id="objectType" name="object_type" value="character">
             <input type="hidden" id="scalePreset" name="scale_preset" value="character">
+            <input type="hidden" id="applyDimensions" name="apply_dimensions" value="false">
             <input type="hidden" id="targetHeight" name="target_height_m" value="1.8">
             <input type="hidden" id="targetLength" name="target_length_m" value="">
             <input type="hidden" id="texture" name="texture" value="true">
@@ -178,6 +179,10 @@
             <div class="setting-row">
               <span class="field-label">Scale</span>
               <div class="scale-control">
+                <label class="dimensions-toggle">
+                  <input id="applyDimensionsCheckbox" type="checkbox">
+                  <span>Учитывать высоту и длину</span>
+                </label>
                 <div class="segmented scale-toggle" role="tablist" aria-label="Export scale">
                   <button type="button" data-scale-preset="small_prop">Small</button>
                   <button class="active" type="button" data-scale-preset="character">Character</button>
@@ -319,9 +324,15 @@
           </div>
           <div id="ratingPanel" class="rating-panel hidden"></div>
           <div id="outputLinks" class="output-links"></div>
+          <div class="result-export" aria-label="Export selected result">
+            <button type="button" data-export-format="obj" disabled>Export OBJ</button>
+            <button type="button" data-export-format="fbx" disabled>Export FBX</button>
+            <span id="exportStatus" role="status" aria-live="polite"></span>
+          </div>
+          <div id="exportLinks" class="output-links"></div>
         </section>
       </section>
     </main>
-    <script src="/app.js?v=36"></script>
+    <script src="/app.js?v=38"></script>
 </body>
 </html>
